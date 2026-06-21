@@ -52,6 +52,7 @@ def _map_service(svc: dict[str, Any]) -> Service:
         eta=svc.get("eta"),
         platform=svc.get("platform"),
         destination=_join_locations(destinations),
+        destination_crs=_join_crs(destinations),
         origin=_join_locations(origins),
         via=_first_via(destinations),
         operator=svc.get("operator"),
@@ -72,18 +73,20 @@ def from_service_details(payload: dict[str, Any] | None) -> Service:
     if not payload:
         return Service(
             std=None, etd=None, sta=None, eta=None, platform=None,
-            destination=None, origin=None, via=None, operator=None,
+            destination=None, destination_crs=None, origin=None, via=None, operator=None,
         )
 
     subsequent = _calling_points(payload.get("subsequentCallingPoints") or [])
     previous = _calling_points(payload.get("previousCallingPoints") or [])
+    final = subsequent[-1] if subsequent else None
     return Service(
         std=payload.get("std"),
         etd=payload.get("etd"),
         sta=payload.get("sta"),
         eta=payload.get("eta"),
         platform=payload.get("platform"),
-        destination=subsequent[-1].location if subsequent else payload.get("locationName"),
+        destination=final.location if final else payload.get("locationName"),
+        destination_crs=final.crs if final else payload.get("crs"),
         origin=previous[0].location if previous else None,
         via=None,
         operator=payload.get("operator"),
@@ -98,6 +101,11 @@ def from_service_details(payload: dict[str, Any] | None) -> Service:
 def _join_locations(locations: list[dict[str, Any]]) -> str | None:
     names = [loc.get("locationName") for loc in locations if loc.get("locationName")]
     return " & ".join(names) if names else None
+
+
+def _join_crs(locations: list[dict[str, Any]]) -> str | None:
+    codes = [loc.get("crs") for loc in locations if loc.get("crs")]
+    return " & ".join(codes) if codes else None
 
 
 def _first_via(locations: list[dict[str, Any]]) -> str | None:
@@ -116,6 +124,7 @@ def _calling_points(groups: list[dict[str, Any]]) -> list[CallingPoint]:
                 points.append(
                     CallingPoint(
                         location=name,
+                        crs=cp.get("crs"),
                         st=cp.get("st"),
                         et=cp.get("et"),
                         at=cp.get("at"),

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 @dataclass(frozen=True)
 class CallingPoint:
     location: str
+    crs: str | None = None  # 3-letter station code
     st: str | None = None  # scheduled time at this point
     et: str | None = None  # estimated time (if no actual)
     at: str | None = None  # actual time (if known)
@@ -26,6 +27,7 @@ class Service:
     eta: str | None  # expected arrival
     platform: str | None
     destination: str | None
+    destination_crs: str | None
     origin: str | None
     via: str | None
     operator: str | None

@@ -45,6 +45,7 @@ class Settings:
     filter_crs_list: list[str] = field(default_factory=lambda: list(DEFAULT_FILTER_CRS))
     time_offset: int = 0
     time_window: int = 120
+    pixoo_host: str | None = None  # optional; auto-discovered if unset
 
     def endpoint(self, name: str) -> Endpoint:
         try:
@@ -92,4 +93,5 @@ def load_settings() -> Settings:
         filter_crs_list=filter_crs_list,
         time_offset=int(os.environ.get("LDBWS_TIME_OFFSET", "0")),
         time_window=int(os.environ.get("LDBWS_TIME_WINDOW", "120")),
+        pixoo_host=(os.environ.get("PIXOO_HOST", "").strip().strip('"') or None),
     )
