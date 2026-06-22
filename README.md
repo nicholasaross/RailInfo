@@ -118,9 +118,9 @@ contract:
 
 ## Credits
 
-- Dot-matrix typeface: **National Rail DMI Regular** by Worldibrahim, made with
-  [FontStruct](https://fontstruct.com/fontstructions/show/2755209/national-rail-dmi-regular)
-  and used under the FontStruct Non-Commercial License (non-commercial use only).
+- Dot-matrix typeface: **Dot Matrix** by Daniel Hart
+  ([DanielHartUK/Dot-Matrix-Typeface](https://github.com/DanielHartUK/Dot-Matrix-Typeface)),
+  used under the SIL Open Font License.
 - Divoom HTTP protocol reference: [SomethingWithComputers/pixoo](https://github.com/SomethingWithComputers/pixoo) /
   [4ch1m/pixoo-rest](https://github.com/4ch1m/pixoo-rest) (used as references for the
   command set; not runtime dependencies)
