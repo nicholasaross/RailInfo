@@ -46,6 +46,11 @@ class Settings:
     time_offset: int = 0
     time_window: int = 120
     pixoo_host: str | None = None  # optional; auto-discovered if unset
+    # Directional filter for the standard departure board: show only services that call
+    # at this CRS (e.g. LBG for London-bound trains). ``direction_filter_type`` is "to"
+    # (calls at, after here) or "from" (came via, before here). None = no filter.
+    direction_filter_crs: str | None = None
+    direction_filter_type: str = "to"
 
     def endpoint(self, name: str) -> Endpoint:
         try:
@@ -87,6 +92,11 @@ def load_settings() -> Settings:
         else list(DEFAULT_FILTER_CRS)
     )
 
+    direction_crs = os.environ.get("DIRECTION_FILTER_CRS", "").strip().strip('"').upper()
+    direction_type = (
+        os.environ.get("DIRECTION_FILTER_TYPE", "to").strip().strip('"').lower() or "to"
+    )
+
     return Settings(
         endpoints=endpoints,
         station_crs=station_crs,
@@ -94,4 +104,6 @@ def load_settings() -> Settings:
         time_offset=int(os.environ.get("LDBWS_TIME_OFFSET", "0")),
         time_window=int(os.environ.get("LDBWS_TIME_WINDOW", "120")),
         pixoo_host=(os.environ.get("PIXOO_HOST", "").strip().strip('"') or None),
+        direction_filter_crs=direction_crs or None,
+        direction_filter_type=direction_type,
     )

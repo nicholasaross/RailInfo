@@ -33,6 +33,24 @@ def main() -> int:
         "--filter",
         help="Comma-separated destination CRS codes (used with --next).",
     )
+    direction = parser.add_mutually_exclusive_group()
+    direction.add_argument(
+        "--to",
+        metavar="CRS",
+        help="Only services that call at this station (e.g. LBG for London-bound). "
+        "Overrides DIRECTION_FILTER_CRS in .env.",
+    )
+    direction.add_argument(
+        "--from",
+        dest="from_crs",
+        metavar="CRS",
+        help="Only services that called at this station before here.",
+    )
+    direction.add_argument(
+        "--all-directions",
+        action="store_true",
+        help="Ignore the DIRECTION_FILTER_CRS default and show every direction.",
+    )
     source = parser.add_mutually_exclusive_group()
     source.add_argument(
         "--next",
@@ -87,9 +105,10 @@ def main() -> int:
     filter_list = (
         [c.strip() for c in args.filter.split(",") if c.strip()] if args.filter else None
     )
+    direction = _direction_kwargs(args)
 
     if args.pixoo or args.preview:
-        return _run_pixoo(args, settings, service)
+        return _run_pixoo(args, settings, service, direction)
 
     try:
         if args.next:
@@ -97,7 +116,9 @@ def main() -> int:
         elif args.arrdep:
             board = service.get_arr_dep_board(args.crs)
         else:
-            board = service.get_departure_board(args.crs, with_details=args.details)
+            board = service.get_departure_board(
+                args.crs, with_details=args.details, **direction
+            )
     except (LdbwsError, ConfigError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -109,9 +130,26 @@ def main() -> int:
     return 0
 
 
-def _run_pixoo(args, settings: Settings, service: BoardService) -> int:
+def _direction_kwargs(args) -> dict[str, object]:
+    """Translate --to/--from/--all-directions into get_departure_board kwargs.
+
+    Returns an empty dict when none is given, so the configured DIRECTION_FILTER_CRS
+    default applies.
+    """
+    if args.all_directions:
+        return {"filter_crs": None}  # explicit override: no filter
+    if args.to:
+        return {"filter_crs": args.to, "filter_type": "to"}
+    if args.from_crs:
+        return {"filter_crs": args.from_crs, "filter_type": "from"}
+    return {}
+
+
+def _run_pixoo(
+    args, settings: Settings, service: BoardService, direction: dict[str, object]
+) -> int:
     try:
-        board = service.get_departure_board(args.crs, with_details=True)
+        board = service.get_departure_board(args.crs, with_details=True, **direction)
     except (LdbwsError, ConfigError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -136,7 +174,14 @@ def _run_pixoo(args, settings: Settings, service: BoardService) -> int:
             device.set_brightness(args.brightness)
         if args.loop:
             print(f"Streaming to Pixoo at {host} (Ctrl+C to stop)...")
-            run_pixoo(service, device, crs=args.crs, refresh=args.interval, fps=args.fps)
+            run_pixoo(
+                service,
+                device,
+                crs=args.crs,
+                refresh=args.interval,
+                fps=args.fps,
+                board_kwargs=direction,
+            )
         else:
             device.push_image(render_board_image(board))
             print(f"Pushed departure board to Pixoo at {host}.")

@@ -30,6 +30,8 @@ class LdbwsClient:
         crs: str,
         *,
         filter_list: list[str] | None = None,
+        filter_crs: str | None = None,
+        filter_type: str = "to",
         time_offset: int = 0,
         time_window: int = 120,
     ) -> dict[str, Any]:
@@ -44,9 +46,13 @@ class LdbwsClient:
                 c.strip().upper() for c in filter_list
             )
         url = self._build_url(endpoint, substitutions)
-        return self._request(
-            endpoint, url, params={"timeOffset": time_offset, "timeWindow": time_window}
-        )
+        params: dict[str, Any] = {"timeOffset": time_offset, "timeWindow": time_window}
+        # Directional filter (GetDepartureBoard/GetArrDepBoard): only services calling at
+        # filter_crs. filter_type is "to" (after here) or "from" (before here).
+        if filter_crs:
+            params["filterCrs"] = filter_crs.strip().upper()
+            params["filterType"] = filter_type
+        return self._request(endpoint, url, params=params)
 
     def get_service_details(self, endpoint: Endpoint, service_id: str) -> dict[str, Any]:
         url = self._build_url(endpoint, {"serviceid": quote(service_id, safe="")})

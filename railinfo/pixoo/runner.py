@@ -19,18 +19,20 @@ def run(
     crs: str | None = None,
     refresh: float = 30.0,
     fps: float = 5.0,
+    board_kwargs: dict[str, object] | None = None,
 ) -> None:
     """Continuously render and push frames until interrupted (Ctrl+C)."""
     frame_interval = 1.0 / fps if fps > 0 else 0.2
     scroll = 0
-    board = service.get_departure_board(crs, with_details=True)
+    bk = board_kwargs or {}  # e.g. directional filter_crs/filter_type from the CLI
+    board = service.get_departure_board(crs, with_details=True, **bk)
     last_refresh = time.monotonic()
 
     while True:
         now = time.monotonic()
         if now - last_refresh >= refresh:
             try:
-                board = service.get_departure_board(crs, with_details=True)
+                board = service.get_departure_board(crs, with_details=True, **bk)
             except LdbwsError:
                 pass  # keep showing the last good board until the next refresh
             last_refresh = now

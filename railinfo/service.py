@@ -15,6 +15,10 @@ from railinfo.domain.mapper import from_ldbws, from_service_details
 from railinfo.domain.models import DepartureBoard, Service
 from railinfo.ldbws.client import LdbwsClient, LdbwsError
 
+# Sentinel for "caller didn't specify, fall back to the configured default". Distinct
+# from None, which explicitly means "no directional filter".
+_USE_SETTINGS: object = object()
+
 
 class BoardService:
     def __init__(self, settings: Settings, client: LdbwsClient | None = None) -> None:
@@ -22,14 +26,27 @@ class BoardService:
         self._client = client or LdbwsClient()
 
     def get_departure_board(
-        self, crs: str | None = None, with_details: bool = False
+        self,
+        crs: str | None = None,
+        with_details: bool = False,
+        *,
+        filter_crs: str | None | object = _USE_SETTINGS,
+        filter_type: str | object = _USE_SETTINGS,
     ) -> DepartureBoard:
         """Primary board: Live Departure Board (_LDB).
 
         When ``with_details`` is set and the Service Details endpoint (_SD) is configured,
         each service is enriched with its calling points via GetServiceDetails.
+
+        ``filter_crs``/``filter_type`` restrict the board to services calling at a station
+        (e.g. London Bridge for London-bound trains). Left unset, the configured
+        ``DIRECTION_FILTER_CRS`` default applies; pass ``filter_crs=None`` to force all.
         """
-        board = self._fetch("ldb", crs)
+        if filter_crs is _USE_SETTINGS:
+            filter_crs = self._settings.direction_filter_crs
+        if filter_type is _USE_SETTINGS:
+            filter_type = self._settings.direction_filter_type
+        board = self._fetch("ldb", crs, filter_crs=filter_crs, filter_type=filter_type)
         if with_details and "sd" in self._settings.endpoints:
             board = dataclasses.replace(
                 board, services=[self._with_calling_points(s) for s in board.services]
@@ -67,13 +84,21 @@ class BoardService:
         )
 
     def _fetch(
-        self, endpoint_name: str, crs: str | None, filter_list: list[str] | None = None
+        self,
+        endpoint_name: str,
+        crs: str | None,
+        filter_list: list[str] | None = None,
+        *,
+        filter_crs: str | None = None,
+        filter_type: str = "to",
     ) -> DepartureBoard:
         endpoint = self._settings.endpoint(endpoint_name)
         payload = self._client.get_board(
             endpoint,
             crs or self._settings.station_crs,
             filter_list=filter_list,
+            filter_crs=filter_crs,
+            filter_type=filter_type,
             time_offset=self._settings.time_offset,
             time_window=self._settings.time_window,
         )
