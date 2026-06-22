@@ -80,12 +80,7 @@ def render_board_image(board: DepartureBoard, *, scroll: int = 0, now: datetime 
     if not services:
         draw.text((0, 0), "No departures", font=_font(_TIME_FONT), fill=AMBER)
 
-    # Stops belong to the first useful (non-cancelled) departure that has calling points —
-    # a cancelled train's stops aren't worth showing.
-    stops_index = next(
-        (i for i, s in enumerate(services) if not s.is_cancelled and s.calling_points),
-        None,
-    )
+    stops_index = _choose_stops_index(services)
     for index, service in enumerate(services):
         # Mark the row whose stops are shown, unless it's the top row (the default).
         _draw_departure(
@@ -137,6 +132,18 @@ def _draw_departure(
     if mark:
         code_w = int(draw.textlength(code, font=code_font))
         draw.text((code_w + 1, y), marker, font=code_font, fill=colour)
+
+
+def _choose_stops_index(services: list[Service]) -> int | None:
+    """Index of the first useful departure to show calling points for.
+
+    The first *non-cancelled* service that actually has calling points — a cancelled
+    train's stops aren't worth showing. Returns None if nothing qualifies.
+    """
+    return next(
+        (i for i, s in enumerate(services) if not s.is_cancelled and s.calling_points),
+        None,
+    )
 
 
 def _headline_time(service: Service) -> str:

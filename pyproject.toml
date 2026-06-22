@@ -10,3 +10,13 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "rich>=15.0.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Put the repo root (for `railinfo`) and tests/ (for `conftest` helpers) on sys.path.
+pythonpath = [".", "tests"]
