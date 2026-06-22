@@ -24,7 +24,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageFont
 from railinfo.domain.models import DepartureBoard, Service
 
 SIZE = 64
-_FONT_PATH = Path(__file__).resolve().parents[2] / "Fonts" / "national-rail-dmi-regular.ttf"
+_FONT_PATH = Path(__file__).resolve().parents[2] / "Fonts" / "dot-matrix-regular.ttf"
 
 BLACK = (0, 0, 0)
 AMBER = (255, 176, 0)
@@ -33,7 +33,7 @@ RED = (255, 45, 35)
 
 # One body size for everything (codes/times/calling) — it lands on whole pixels so the
 # dot-matrix font thresholds crisply (see _threshold). The clock is doubled for emphasis.
-_BODY_FONT = 9
+_BODY_FONT = 10
 _CODE_FONT = _BODY_FONT
 _TIME_FONT = _BODY_FONT
 _CALLING_FONT = _BODY_FONT
@@ -113,25 +113,43 @@ def _draw_departure(
 ) -> None:
     """Destination CRS code on the left (big), time in a right-hand column.
 
+    The time is drawn with monospaced digits so every column lines up across rows;
     ``mark`` draws a ``<`` after the code to flag the row whose calling points are shown.
     """
     colour = _status_colour(service)
     code_font = _font(_CODE_FONT)
     time_font = _font(_TIME_FONT)
 
-    time_text = _headline_time(service)
-    time_w = int(draw.textlength(time_text, font=time_font))
-    time_x = SIZE - _MARGIN - time_w
-    draw.text((time_x, y + 1), time_text, font=time_font, fill=colour)
+    time_left = _draw_time(draw, _headline_time(service), SIZE - _MARGIN, y + 1, time_font, colour)
 
     marker = "<"
     marker_w = int(draw.textlength(marker, font=code_font)) + 1 if mark else 0
     code = service.destination_crs or _abbreviate(service.destination or "-")
-    code = _fit_words(draw, code_font, code, time_x - _MARGIN - 1 - marker_w)
+    code = _fit_words(draw, code_font, code, time_left - _MARGIN - 1 - marker_w)
     draw.text((0, y), code, font=code_font, fill=colour)
     if mark:
         code_w = int(draw.textlength(code, font=code_font))
         draw.text((code_w + 1, y), marker, font=code_font, fill=colour)
+
+
+def _draw_time(draw: ImageDraw.ImageDraw, text: str, right_x: int, y: int, font, colour) -> int:
+    """Draw ``text`` right-aligned to ``right_x`` with tabular (monospaced) digits.
+
+    Each digit sits right-aligned in a fixed cell as wide as the widest digit, so the narrow
+    "1" can't shift its neighbours — every digit column lines up across rows, like a real
+    platform board. Non-digit glyphs (the colon, or a "—" fallback) keep their own width.
+    Returns the block's left x so the caller can keep the code clear of it.
+    """
+    cell = max(int(round(font.getlength(d))) for d in "0123456789")
+    widths = [cell if ch.isdigit() else int(round(font.getlength(ch))) for ch in text]
+    left = right_x - sum(widths)
+
+    x = left
+    for ch, width in zip(text, widths):
+        # Right-align within the cell so digits' right edges (and thus columns) align.
+        draw.text((x + width - int(round(font.getlength(ch))), y), ch, font=font, fill=colour)
+        x += width
+    return left
 
 
 def _choose_stops_index(services: list[Service]) -> int | None:
