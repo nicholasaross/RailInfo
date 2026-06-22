@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import logging
 import sys
 
 from railinfo.config import ConfigError, Settings, load_settings
@@ -173,6 +174,12 @@ def _run_pixoo(
         if args.brightness is not None:
             device.set_brightness(args.brightness)
         if args.loop:
+            # Unattended/long-running: send the runner's progress and warnings to stdout
+            # so they're visible via `docker logs` (and the terminal when run directly).
+            logging.basicConfig(
+                level=logging.INFO,
+                format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+            )
             print(f"Streaming to Pixoo at {host} (Ctrl+C to stop)...")
             run_pixoo(
                 service,
