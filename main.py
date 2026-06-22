@@ -180,6 +180,10 @@ def _run_pixoo(
                 level=logging.INFO,
                 format="%(asctime)s %(levelname)s %(name)s: %(message)s",
             )
+            # httpx logs every request ("HTTP Request: ...") at INFO; at ~5 fps that floods
+            # the log, so keep it (and httpcore) to warnings only.
+            logging.getLogger("httpx").setLevel(logging.WARNING)
+            logging.getLogger("httpcore").setLevel(logging.WARNING)
             print(f"Streaming to Pixoo at {host} (Ctrl+C to stop)...")
             run_pixoo(
                 service,
