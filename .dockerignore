@@ -1,0 +1,28 @@
+# Keep the build context (and image) small and free of secrets / host cruft.
+
+# VCS and Docker meta
+.git/
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# Local virtual environment — rebuilt fresh inside the image from uv.lock
+.venv/
+
+# Python build/cache artifacts
+__pycache__/
+*.py[co]
+*.egg-info/
+build/
+dist/
+wheels/
+
+# Tests and dev-only files aren't needed at runtime
+tests/
+.python-version
+
+# Secrets and generated artifacts (injected/created at runtime instead)
+.env
+*.log
+preview*.png

@@ -1,0 +1,37 @@
+# RailInfo on Synology Container Manager (DS218+, x86_64).
+# Deploy as a Container Manager "Project" pointing at this file, or run `docker compose up -d`.
+
+services:
+  railinfo:
+    build: .
+    image: railinfo:latest
+    container_name: railinfo
+    # Survive crashes and NAS reboots; stops cleanly on SIGTERM (handled by the run loop).
+    restart: unless-stopped
+
+    # host networking is the least-friction way to reach the Pixoo on the LAN (and lets
+    # Divoom discovery work if you ever drop PIXOO_HOST). The container publishes no ports.
+    # Bridge alternative: remove this line — PIXOO_HOST below makes the panel reachable.
+    network_mode: host
+
+    # Secrets and station config live in .env, kept out of the image:
+    #   BWS_API_KEY_LDB / LDBWS_BASE_URL_LDB   (+ _LADB / _LNDB / _SD)
+    #   STATION_CRS, FILTER_CRS_LIST, DIRECTION_FILTER_CRS, DIRECTION_FILTER_TYPE
+    env_file: .env
+
+    environment:
+      # Board clock uses local time; without this it shows UTC.
+      - TZ=Europe/London
+      # Pin the panel to a DHCP-reserved IP rather than relying on in-container discovery.
+      - PIXOO_HOST=192.168.1.202
+
+    # Cap log growth — this runs 24/7 and the DS218+ has limited storage; without this the
+    # json-file log grows unbounded.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Optional: override the default `--loop` (e.g. tune refresh/fps or brightness).
+    # command: ["python", "main.py", "--loop", "--fps", "5", "--interval", "30"]
