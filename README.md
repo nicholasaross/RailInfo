@@ -3,8 +3,9 @@
 A software-only live National Rail departure board, inspired by
 [chrisys/train-departure-display](https://github.com/chrisys/train-departure-display)
 but with no Raspberry Pi hardware. It reads real-time data from the National Rail
-**LDBWS** REST API (via the Rail Data Marketplace) and renders it to the terminal or a
-[Divoom Pixoo 64](https://divoom.com/products/pixoo-64).
+**LDBWS** REST API (via the Rail Data Marketplace) and renders it to the terminal, a
+[Divoom Pixoo 64](https://divoom.com/products/pixoo-64), or a battery e-ink board (a
+Heltec Wireless Paper) fed by a small JSON server.
 
 ## Phase 1 — LDBWS departure board (done)
 
@@ -65,9 +66,11 @@ National Rail dot-matrix font (amber on black): three departures shown as
 a scrolling "calling at…" line, and a large clock. Details:
 
 - **Colour encodes status** — amber = on time, orange = delayed, red = cancelled.
-- **Delayed services show their revised expected time** (e.g. `13:59`), not the scheduled one.
+- **Delayed services show the scheduled time plus the revised minute** (e.g. `13:25 :28`),
+  matching the e-ink board's notation; the `P` platform prefix is dropped to make room.
 - **The "calling at…" line follows the first non-cancelled departure** with stops; if that
-  isn't the top row, a `<` after its CRS code marks which train it belongs to.
+  isn't the top row, a `<` after its CRS code marks which train it belongs to. The station
+  code is **never truncated** — when room is tight the platform/minute give way instead.
 - **Glyphs are thresholded to pure on/off pixels** after rendering, so the TrueType font's
   antialiasing fringe never reaches the LEDs — it stays crisp at this size.
 
@@ -84,6 +87,37 @@ automatically via Divoom's LAN discovery; override with `--pixoo-host` or `PIXOO
 scroll is deliberately paced. `--loop` re-fetches data every `--interval` seconds (default
 30) and keeps the last good board if a refresh fails.
 
+## Phase 4 — JSON server + Heltec e-ink client (done)
+
+A small stdlib HTTP server (`--serve`) exposes the board as JSON at `/board`, and a
+[Heltec Wireless Paper](clients/heltec/README.md) (ESP32-S3 + 2.13" e-ink, MicroPython)
+polls it over Wi-Fi and renders a live board. Three views, chosen with `?view=`:
+
+- `departures` (default) — London-bound board with the "calling at…" line (landscape).
+- `all` — every departure, no direction filter (portrait).
+- `arrivals` — arriving services, labelled by origin (portrait).
+
+The server **holds no state until a client connects** — it never calls LDBWS at startup.
+The first request for a view returns `{"status": "starting", …}` immediately and fetches
+that view in the background; once it lands, later polls get the real board (`"status":
+"ready"`). Each view is then cached and refreshed lazily (per-view TTL = `--interval`,
+default 30s), keeping the last good board if a refresh fails. So the server sits idle — and
+makes no API calls — whenever nothing is displaying it.
+
+### Run both displays
+
+The e-ink board is fed by the server; the Pixoo is driven by the `--loop` streamer, which
+calls LDBWS directly. They're independent processes — run both to populate both clients:
+
+```bash
+uv run python -u main.py --serve --port 8000   # JSON API the Heltec e-ink board polls
+uv run python -u main.py --pixoo --loop         # streams frames to the Pixoo 64
+```
+
+The Heltec can't resolve hostnames, so set the server's LAN IP (not a name) in
+`clients/heltec/config.py`. See the [client README](clients/heltec/README.md) for flashing,
+fonts, the PRG-button view cycling, and configuration.
+
 ## Development
 
 ```bash
@@ -99,22 +133,24 @@ needed, which is the quickest way to eyeball a rendering change.
 
 ## Architecture
 
-Data acquisition is decoupled from presentation behind a stable domain model, so a future
-containerised service (Phase 3) and ESP32 e-ink client (Phase 4) can share the same
-contract:
+Data acquisition is decoupled from presentation behind a stable domain model, so every
+renderer — terminal, Pixoo, and the e-ink client's JSON server — shares one contract:
 
 - `railinfo/config.py` — load `.env` into per-product endpoints.
 - `railinfo/ldbws/client.py` — thin HTTP client (URL templating, `x-apikey`, errors).
 - `railinfo/domain/` — `models.py` (the contract) and `mapper.py` (LDBWS JSON → model).
-- `railinfo/service.py` — fetch + map; the seam a Phase 3 HTTP API would wrap.
+- `railinfo/service.py` — fetch + map; the seam every renderer and the server wrap.
 - `railinfo/renderers/` — consume the domain model only (`terminal.py`, `pixoo.py`).
 - `railinfo/pixoo/` — `device.py` (Divoom HTTP API + LAN discovery) and `runner.py` (loop).
+- `railinfo/server.py` — Phase 4 JSON API (`--serve`); projects the domain model to `/board`.
+- `clients/heltec/` — MicroPython e-ink client (polls the server; see its own README).
 - `tests/` — pytest suite; `scripts/preview_board.py` — offline PNG preview.
 
 ## Roadmap
 
-- **Phase 3** (optional) — containerise the service for a Synology NAS.
-- **Phase 4** (optional) — ESP32 e-ink client consuming the same JSON.
+- **Phase 3** (deferred) — containerise the service + Pixoo loop for a Synology NAS, the
+  permanent home for the two dev-box processes. A `docker-compose.yml` with both services
+  (`railinfo-server` and the Pixoo `--loop`) is already in the repo.
 
 ## Credits
 

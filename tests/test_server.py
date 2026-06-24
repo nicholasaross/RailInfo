@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
-import urllib.error
+import time
 import urllib.request
 from http.server import ThreadingHTTPServer
 
@@ -13,6 +13,20 @@ from conftest import make_service
 from railinfo.domain.models import CallingPoint, DepartureBoard
 from railinfo.ldbws.client import LdbwsError
 from railinfo.server import ViewCache, _make_handler, _stops_index, to_client_dict
+
+
+def _ready(cache: ViewCache, view: str = "departures") -> dict:
+    """Touch a view and drive its background initial fetch to completion, returning the board.
+
+    The first ``get`` returns a "starting" placeholder and kicks off the fetch on a thread;
+    poll until the real board (``status: "ready"``) lands.
+    """
+    for _ in range(200):
+        data = json.loads(cache.get(view))
+        if data.get("status") != "starting":
+            return data
+        time.sleep(0.005)
+    raise AssertionError("view never became ready: " + view)
 
 
 def _dep_board() -> DepartureBoard:
@@ -74,6 +88,7 @@ def test_stops_index_skips_cancelled():
 
 def test_to_client_dict_departures_with_calling():
     data = to_client_dict(_dep_board(), limit=2, with_calling=True)
+    assert data["status"] == "ready"
     assert data["station"] == "Earlswood"
     assert len(data["services"]) == 2
     assert data["stops_index"] == 1
@@ -93,26 +108,27 @@ def test_to_client_dict_arrivals_uses_origin_and_arrival_time():
     assert "calling_at" not in data         # portrait views omit calling points
 
 
-def test_cache_lazy_then_ttl_then_keep_stale():
+def test_cache_starts_lazily_then_ttl_then_keep_stale():
     svc = _FakeService()
     cache = ViewCache(svc, ttl=999)
-    p1 = cache.get("departures")
-    assert p1 is not None and svc.dep_calls == 1
+    assert json.loads(cache.get("departures"))["status"] == "starting"  # first touch: lazy
+    data = _ready(cache, "departures")  # background initial fetch lands
+    assert data["status"] == "ready" and svc.dep_calls == 1
+    good = cache.get("departures")
     cache.get("departures")  # within TTL -> served from cache, no new fetch
     assert svc.dep_calls == 1
 
     cache._ttl = 0  # force staleness; failing service must keep the last good payload
     cache._service = _FailingService()
-    assert cache.get("departures") == p1
+    assert cache.get("departures") == good
 
 
 def test_cache_views_are_independent():
     svc = _FakeService()
     cache = ViewCache(svc, ttl=999)
-    cache.get("all")
-    cache.get("arrivals")
+    _ready(cache, "all")
+    arr = _ready(cache, "arrivals")
     assert svc.dep_calls == 1 and svc.arr_calls == 1
-    arr = json.loads(cache.get("arrivals"))
     assert arr["services"][0]["destination"] == "London Bridge"  # origin
 
 
@@ -123,7 +139,10 @@ def _serve(cache):
 
 
 def test_http_serves_views_and_health():
-    httpd = _serve(ViewCache(_FakeService(), ttl=999))
+    cache = ViewCache(_FakeService(), ttl=999)
+    _ready(cache, "departures")  # drive the lazy initial fetches before hitting the API
+    _ready(cache, "arrivals")
+    httpd = _serve(cache)
     port = httpd.server_address[1]
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/board", timeout=5) as r:
@@ -137,16 +156,16 @@ def test_http_serves_views_and_health():
         httpd.server_close()
 
 
-def test_http_503_before_first_board():
+def test_http_starting_before_first_board():
+    # A cold view answers 200 with a "starting" board (not a 503), so the poll-and-render
+    # clients treat startup as a normal frame. A failing upstream just keeps it "starting".
     httpd = _serve(ViewCache(_FailingService(), ttl=999))
     port = httpd.server_address[1]
     try:
-        code = None
-        try:
-            urllib.request.urlopen(f"http://127.0.0.1:{port}/board", timeout=5)
-        except urllib.error.HTTPError as exc:
-            code = exc.code
-        assert code == 503
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/board", timeout=5) as r:
+            data = json.loads(r.read())
+        assert data["status"] == "starting"
+        assert data["services"] == []
     finally:
         httpd.shutdown()
         httpd.server_close()

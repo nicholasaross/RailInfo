@@ -5,8 +5,10 @@ National-Rail dot-matrix look: amber text on black. Layout (64x64):
 * rows 0-2  — up to three departures: ``CRS  P# HH:MM`` (destination code on the left;
   platform + time right-justified flush to the edge on the same row, colour = status). Codes
   keep names short so the font stays large and legible. A delayed service appends ``:MM`` of
-  the revised minute and drops the ``P`` prefix to make room (e.g. ``2 13:25 :28``), keeping
-  the code untruncated — matching the Heltec's notation.
+  the revised minute and drops the ``P`` prefix to make room (e.g. ``2 13:25 :28``) — matching
+  the Heltec's notation. **The station code is never truncated**: when room is tight (a marked
+  and/or delayed row), the right-hand block degrades instead — dropping the platform, then the
+  ``:MM`` minute — so the code always survives whole.
 * row ~35   — the "calling at …" line for the first *non-cancelled* departure, scrolled
   horizontally. If that isn't the top row, a ``<`` after its code marks which train it is.
 * rows 47+  — a large centred clock.
@@ -113,28 +115,75 @@ def _threshold(image: Image.Image) -> Image.Image:
 def _draw_departure(
     draw: ImageDraw.ImageDraw, service: Service, *, y: int, mark: bool = False
 ) -> None:
-    """Destination CRS code on the left (big), time in a right-hand column.
+    """Destination CRS code on the left (big), platform + time in a right-hand column.
 
-    The time is drawn with monospaced digits so every column lines up across rows;
-    ``mark`` draws a ``<`` after the code to flag the row whose calling points are shown.
+    The station code is never truncated to make room: ``mark`` (a ``<`` after the code,
+    flagging the train whose calling points are shown) and a delayed service's wide ``:MM``
+    suffix are absorbed by degrading the right-hand block, not the code — see
+    :func:`_choose_layout`. The time uses tabular digits so columns line up across rows.
     """
     colour = _status_colour(service)
     code_font = _font(_CODE_FONT)
     time_font = _font(_TIME_FONT)
 
-    # Platform + time, like the Heltec's right-hand block; on the same row as the code and
-    # hard against the right edge. SIZE + 1 lands the digits' ink on the final column — the
-    # +1 absorbs the font's right side bearing so there's no gap.
-    time_left = _draw_time(draw, _right_text(service), SIZE + 1, y, time_font, colour)
-
-    marker = "<"
-    marker_w = int(draw.textlength(marker, font=code_font)) + 1 if mark else 0
-    code = service.destination_crs or _abbreviate(service.destination or "-")
-    code = _fit_words(draw, code_font, code, time_left - _MARGIN - 1 - marker_w)
+    code, right = _choose_layout(service, mark=mark)
+    # Right-hand block hard against the edge. SIZE + 1 lands the digits' ink on the final
+    # column — the +1 absorbs the font's right side bearing so there's no gap.
+    _draw_time(draw, right, SIZE + 1, y, time_font, colour)
     draw.text((0, y), code, font=code_font, fill=colour)
     if mark:
-        code_w = int(draw.textlength(code, font=code_font))
-        draw.text((code_w + 1, y), marker, font=code_font, fill=colour)
+        code_w = int(round(code_font.getlength(code)))
+        draw.text((code_w + 1, y), "<", font=code_font, fill=colour)
+
+
+def _choose_layout(service: Service, *, mark: bool) -> tuple[str, str]:
+    """Pick the station code and the richest right-hand block that share one 64px row.
+
+    The code (a 3-letter CRS, usually) is kept whole; the right block degrades to fit the
+    space beside it (and beside the ``<`` marker, when ``mark``): full ``P# HH:MM[ :MM]`` →
+    drop the platform → drop the ``:MM`` minute. Only a long destination *name* fallback
+    (never a CRS) can force the code itself to be trimmed, as a last resort. Pure (font
+    metrics only), so the never-truncate guarantee is unit-testable without rendering.
+    """
+    code_font = _font(_CODE_FONT)
+    time_font = _font(_TIME_FONT)
+    code = service.destination_crs or _abbreviate(service.destination or "-")
+    marker_w = int(round(code_font.getlength("<"))) + 1 if mark else 0
+
+    candidates = _right_candidates(service)
+    budget = SIZE - int(round(code_font.getlength(code))) - marker_w - _MARGIN
+    right = next((c for c in candidates if _tabular_width(time_font, c) <= budget), None)
+    if right is None:
+        # Even the narrowest block won't fit beside the whole code (a long name, not a CRS):
+        # trim the code as a last resort so nothing overflows the panel.
+        right = candidates[-1]
+        room = SIZE - marker_w - _MARGIN - _tabular_width(time_font, right)
+        code = _fit_words(code_font, code, room)
+    return code, right
+
+
+def _right_candidates(service: Service) -> list[str]:
+    """Right-hand blocks from richest to poorest, so the code needn't shrink to fit one.
+
+    The first equals :func:`_right_text`; the rest drop the platform, then the delay-minute
+    suffix (``HH:MM :MM`` → ``HH:MM``), keeping at least the scheduled time.
+    """
+    candidates = [_right_text(service)]
+    for shorter in (_headline_time(service), service.time):  # drop platform, then drop :MM
+        if shorter not in candidates:
+            candidates.append(shorter)
+    return candidates
+
+
+def _char_widths(font, text: str) -> list[int]:
+    """Per-character widths with digits in a fixed widest-digit cell (tabular alignment)."""
+    cell = max(int(round(font.getlength(d))) for d in "0123456789")
+    return [cell if ch.isdigit() else int(round(font.getlength(ch))) for ch in text]
+
+
+def _tabular_width(font, text: str) -> int:
+    """Width of ``text`` as :func:`_draw_time` lays it out (tabular digit cells)."""
+    return sum(_char_widths(font, text))
 
 
 def _draw_time(draw: ImageDraw.ImageDraw, text: str, right_x: int, y: int, font, colour) -> int:
@@ -143,10 +192,9 @@ def _draw_time(draw: ImageDraw.ImageDraw, text: str, right_x: int, y: int, font,
     Each digit sits right-aligned in a fixed cell as wide as the widest digit, so the narrow
     "1" can't shift its neighbours — every digit column lines up across rows, like a real
     platform board. Non-digit glyphs (the colon, or a "—" fallback) keep their own width.
-    Returns the block's left x so the caller can keep the code clear of it.
+    Returns the block's left x.
     """
-    cell = max(int(round(font.getlength(d))) for d in "0123456789")
-    widths = [cell if ch.isdigit() else int(round(font.getlength(ch))) for ch in text]
+    widths = _char_widths(font, text)
     left = right_x - sum(widths)
 
     x = left
@@ -229,19 +277,19 @@ def _draw_scrolling(image, draw, font, text, y, scroll, colour) -> None:
     image.paste(strip, (total - offset, y))
 
 
-def _fit_words(draw: ImageDraw.ImageDraw, font, text: str, max_width: int) -> str:
-    """Truncate to fit, preferring whole-word cuts over dangling part-words."""
-    if draw.textlength(text, font=font) <= max_width:
+def _fit_words(font, text: str, max_width: int) -> str:
+    """Truncate to fit ``max_width`` px, preferring whole-word cuts over dangling part-words."""
+    if font.getlength(text) <= max_width:
         return text
     # Drop trailing words until it fits.
     words = text.split(" ")
     while len(words) > 1:
         words.pop()
         candidate = " ".join(words)
-        if draw.textlength(candidate, font=font) <= max_width:
+        if font.getlength(candidate) <= max_width:
             return candidate
     # A single long word: fall back to a hard character cut.
     word = words[0]
-    while word and draw.textlength(word, font=font) > max_width:
+    while word and font.getlength(word) > max_width:
         word = word[:-1]
     return word

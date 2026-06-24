@@ -100,7 +100,8 @@ def main() -> int:
         "--serve",
         action="store_true",
         help="Run an HTTP server exposing the board as JSON at /board (for the Heltec "
-        "e-ink client). Refreshes data every --interval seconds.",
+        "e-ink client). Queries LDBWS lazily on client demand (idle until one connects); "
+        "--interval sets the per-view cache TTL.",
     )
     server.add_argument(
         "--host", default="0.0.0.0", help="Server bind address (with --serve)."

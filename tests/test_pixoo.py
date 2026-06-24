@@ -54,6 +54,31 @@ def test_right_text_cancelled_drops_platform():
     assert _right_text(svc) == "13:25"
 
 
+# --- _choose_layout / _right_candidates: the code is never truncated -----------------
+
+def test_right_candidates_degrade_platform_then_delay_minute():
+    # Richest first (== _right_text), then drop the platform, then drop the :MM minute.
+    svc = make_service(std="13:25", etd="13:28", platform="12")
+    assert pixoo._right_candidates(svc) == ["12 13:25 :28", "13:25 :28", "13:25"]
+
+
+def test_marked_delayed_keeps_full_code():
+    # The case from the brief: a delayed, marked ("<") row with a wide 2-digit platform.
+    # The right-hand block must degrade so the 3-letter station code is never truncated.
+    svc = make_service(std="13:25", etd="13:28", platform="12",
+                       destination="London Bridge", destination_crs="LBG")
+    code, right = pixoo._choose_layout(svc, mark=True)
+    assert code == "LBG"            # full code preserved...
+    assert right != "12 13:25 :28"  # ...because the right block gave way instead
+
+
+def test_unmarked_on_time_keeps_platform_and_time():
+    # Plenty of room: a short code + on-time service shows the full "P# HH:MM" block.
+    svc = make_service(std="13:25", etd="On time", platform="2", destination_crs="VIC")
+    code, right = pixoo._choose_layout(svc, mark=False)
+    assert (code, right) == ("VIC", "P2 13:25")
+
+
 def test_headline_time_cancelled_shows_scheduled():
     svc = make_service(std="13:25", etd=None, is_cancelled=True)
     assert _headline_time(svc) == "13:25"

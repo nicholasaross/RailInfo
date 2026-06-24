@@ -163,13 +163,18 @@ def render(display, wri_h, wri_r, wri_f, data):
         _draw(wri_f, 0, fy, foot)
 
 
-def _screen(display, wri, lines):
-    """Full-refresh a short status/error message (transient, not the data board)."""
+def _draw_status(display, wri, lines):
+    """Draw a short status/message into the framebuffer (landscape; no e-ink refresh)."""
     display.fill(1)
     y = 4
     for ln in lines:
         _draw(wri, 2, y, ln)
         y += wri.font.height() + 3
+
+
+def _screen(display, wri, lines):
+    """Full-refresh a short status/error message (transient, not the data board)."""
+    _draw_status(display, wri, lines)
     display.update()
 
 
@@ -384,7 +389,11 @@ def run():
                 _wait(POLL_INTERVAL_S)
                 continue
 
-            if portrait:
+            if data.get("status") == "starting":
+                # Server is up but hasn't fetched yet (lazy: it only queries LDBWS once a
+                # client connects). Show a startup notice; the board lands on a later poll.
+                _draw_status(display, wri_r, ["RailInfo", "Starting up..."])
+            elif portrait:
                 render_portrait(display, port, wri_p, data, title)
             else:
                 render(display, wri_h, wri_r, wri_f, data)

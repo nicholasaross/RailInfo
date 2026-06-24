@@ -19,15 +19,19 @@ Data acquisition is decoupled from presentation behind `railinfo/domain` + `rail
 - `railinfo/pixoo/` — Divoom device + hardened push `runner.py`.
 - `railinfo/server.py` — **Phase 4 JSON API** (stdlib `http.server`). `python main.py --serve`.
   Views via `?view=`: `departures` (default, London-bound, with calling points),
-  `all` (every direction), `arrivals` (by origin). Per-view lazy cache w/ TTL, keep-stale on
-  error. `docker-compose.yml` has a `railinfo-server` service (same image, `--serve`).
+  `all` (every direction), `arrivals` (by origin). **Lazy on connect**: no LDBWS call at
+  startup — the first request for a view returns `{"status":"starting"}` and fetches that view
+  on a background thread; later polls get the real board (`"status":"ready"`). Per-view TTL
+  cache after that, keep-stale on error. `docker-compose.yml` has a `railinfo-server` service.
 - `clients/heltec/` — **Phase 4 MicroPython client** for the Heltec Wireless Paper V1.2.
 
 ## Heltec client (`clients/heltec/`)
 
 Polls `SERVER_URL?view=<view>` every ~5s and renders a board; e-ink full refresh (~1.5s) only
 when the framebuffer actually changes (byte-compare). Modes cycled by the **PRG button (GPIO0)**:
-`departures` (landscape) → `all departures` (portrait) → `arrivals` (portrait).
+`departures` (landscape) → `all departures` (portrait) → `arrivals` (portrait). A payload with
+`status == "starting"` (the server's lazy first response) draws a **"Starting up..."** screen
+instead of a board; the real board lands on a later poll.
 
 - Fonts: **proportional** Dot Matrix bitmaps generated from `Fonts/dot-matrix-regular.ttf` —
   `dotmatrix9` (header/footer/portrait), `dotmatrix19` (landscape rows). Built by
@@ -55,7 +59,7 @@ when the framebuffer actually changes (byte-compare). Modes cycled by the **PRG 
 - MicroPython can't resolve hostnames → `clients/heltec/config.py` `SERVER_URL` must be an IP.
   `config.py` is gitignored (WiFi creds + server IP); dev-box server = `192.168.1.116:8000`.
 - Font regen needs freetype-py (cached in uv): `uv run --offline --with freetype-py ...`.
-- Run tests: `uv run --offline pytest` (37 tests incl. `tests/test_server.py`).
+- Run tests: `uv run --offline pytest` (45 tests incl. `tests/test_server.py`).
 
 ---
 
@@ -82,13 +86,36 @@ processes (ephemeral — see below).
   `HH:MM :MM` (sched + revised minute) instead of replacing the time. Test updated; full suite
   **38 green**; live stream restarted onto the new code.
 
+### Done this session (2026-06-24, cont.)
+- **Pixoo: station code never truncated** (part a). `_draw_departure` used to draw the right
+  block first then truncate the code to fit; inverted it. New `_choose_layout` reserves the full
+  code + `<` marker and picks the richest right block that fits beside it via `_right_candidates`
+  (full `P# HH:MM[ :MM]` → drop platform → drop `:MM`). A long destination *name* (never a CRS)
+  can still be trimmed as a last resort. Tests: `test_marked_delayed_keeps_full_code` etc.
+- **Server lazy on connect** (part b). Dropped the startup prime in `serve()`; `ViewCache` now
+  starts empty and, on the first request per view, returns `{"status":"starting"}` and runs the
+  initial `_fetch` on a daemon thread (guarded by `_inflight`; logs "First client connected…").
+  Real board (`"status":"ready"`) lands on a later poll. `/board` is now always 200 (no more
+  503 "no board yet"). `to_client_dict` gained `"status":"ready"`. `--serve` help reworded.
+- **Heltec shows "Starting up..."** on `status == "starting"` (`railinfo_client.py`, new
+  `_draw_status`). **Repo only — NOT yet redeployed to the device** (still runs the prior
+  autostart `main.py`; un-redeployed it degrades to a blank "No departures" frame for ~1 poll).
+- **Docs**: README gained a real **Phase 4** section + the run-both-displays commands; fixed the
+  stale Pixoo delay notation. CLAUDE.md architecture/decisions updated. Suite **45 green**.
+
 ### Run it (dev box — both die if the box sleeps or Claude/terminal closes; auto-restart wrapper helps)
-1. Server (network → **disable sandbox**): `uv run python -u main.py --serve --port 8000`
-2. Pixoo stream (network): `uv run python -u main.py --pixoo --loop` (auto-discovers .202)
+Two independent processes populate the two clients (Heltec ← server; Pixoo ← direct LDBWS):
+1. Server for the Heltec (network → **disable sandbox**): `uv run python -u main.py --serve --port 8000`
+   — now idle until the Heltec connects (queries LDBWS lazily, not at startup).
+2. Pixoo stream (network → **disable sandbox**): `uv run python -u main.py --pixoo --loop` (auto-discovers .202)
 3. Heltec autostarts on power; recovers ~5s after the server returns. config.py →
    `192.168.1.116:8000`; device DHCP `192.168.1.139`. (Re-check dev-box IP with `ipconfig`.)
 
 ### Still pending
+- [ ] **Redeploy the Heltec** to pick up the "Starting up..." screen: `mpremote` cp
+      `railinfo_client.py` → `:main.py` on COM3 (byte-match + remove stale). Optional — the
+      device works without it; it just won't show the startup notice. Validate the lazy-server
+      startup flow on-device after.
 - [ ] **Repo-side** font cleanup (device is done): delete `clients/heltec/lib/`
       `dotmatrix16/17/18/20..30` + `dm16mono/dm18mono/dm19mono`; set `gen_fonts.ps1 $sizes` to
       `9, 19`. (Repo keeps the scratch scripts as source/diagnostics.)
@@ -103,5 +130,10 @@ processes (ephemeral — see below).
 - Direction filter `DIRECTION_FILTER_CRS=LBG` in `.env` drives the default London-bound view.
 - PRG=GPIO0 via **Pin IRQ** (not polling); portrait transpose 90° CW; PortraitCanvas 121×250.
 - Pixoo rows mirror the Heltec's right block (`P# HH:MM`), drawn **flush-right** (`SIZE + 1`
-  absorbs the font side-bearing). On **delayed** rows only, the `P` is dropped (bare platform
-  number) so the 3-letter destination code isn't truncated on the 64px panel.
+  absorbs the font side-bearing). **The station code is never truncated**: the right block
+  degrades to fit beside the whole code + `<` marker — `P# HH:MM[ :MM]` → drop `P` (delayed) →
+  drop platform → drop `:MM`. (`_choose_layout` / `_right_candidates` in `pixoo.py`.)
+- Server is **lazy on connect** (no LDBWS at startup); first request per view → `status:
+  "starting"` + background fetch. Clients render "starting" as a notice, not an error.
+- Pixoo stays a **direct** LDBWS consumer (`--pixoo --loop`), not a client of `--serve`; the
+  server feeds only the Heltec. "Populate both clients" = run both processes.

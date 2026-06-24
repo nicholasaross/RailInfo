@@ -7,10 +7,14 @@ Three views, selected with ``?view=``:
 * ``all`` — every departure, no direction filter (the Heltec's portrait view).
 * ``arrivals`` — arriving services, labelled by origin (portrait view).
 
-Each view is cached with a short TTL and fetched lazily, so however often a client polls
-(the Heltec polls ~5s) it only triggers an upstream LDBWS call when that view's cache is
-stale (~once per TTL). A dropped refresh keeps serving the last good payload — the same
-keep-serving-stale resilience as :mod:`railinfo.pixoo.runner`. Built from the stdlib only.
+The server holds **no state until a client connects** — it never queries LDBWS eagerly at
+startup. The first request for a view returns ``{"status": "starting", ...}`` immediately and
+kicks off that view's initial fetch in the background; once it lands, subsequent polls get the
+real board (``"status": "ready"``). Thereafter each view is cached with a short TTL and
+refreshed lazily, so however often a client polls (the Heltec polls ~5s) it only triggers an
+upstream LDBWS call when that view's cache is stale (~once per TTL). A dropped refresh keeps
+serving the last good payload — the same keep-serving-stale resilience as
+:mod:`railinfo.pixoo.runner`. Built from the stdlib only.
 """
 
 from __future__ import annotations
@@ -75,6 +79,7 @@ def to_client_dict(
     """Project a :class:`DepartureBoard` into the compact JSON a display client needs."""
     services = board.services[:limit]
     out = {
+        "status": "ready",
         "station": board.location_name,
         "crs": board.crs,
         "generated_at": board.generated_at,
@@ -91,7 +96,13 @@ def to_client_dict(
 
 
 class ViewCache:
-    """Per-view JSON cache, fetched lazily with a TTL and keeping the last good payload."""
+    """Per-view JSON cache, fetched lazily with a TTL and keeping the last good payload.
+
+    Starts empty and queries LDBWS only once a client connects: the first request for a view
+    returns a ``status: "starting"`` placeholder and triggers that view's initial fetch on a
+    background thread, so the response is instant and no upstream call happens until something
+    is actually displaying the board.
+    """
 
     def __init__(
         self,
@@ -107,6 +118,19 @@ class ViewCache:
         self._ttl = ttl
         self._lock = threading.Lock()
         self._cache: dict[str, tuple[bytes, float]] = {}
+        self._inflight: set[str] = set()  # views whose initial fetch is running
+        self._started = False  # has any client connected yet?
+        self._starting = json.dumps(
+            {
+                "status": "starting",
+                "station": None,
+                "crs": self._crs,
+                "generated_at": None,
+                "messages": ["Starting up…"],
+                "services": [],
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
 
     def _fetch(self, view: str) -> bytes:
         if view == "arrivals":
@@ -124,22 +148,54 @@ class ViewCache:
             payload = to_client_dict(board, LANDSCAPE_LIMIT, with_calling=True)
         return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
-    def get(self, view: str) -> bytes | None:
+    def get(self, view: str) -> bytes:
         if view not in VIEWS:
             view = "departures"
         with self._lock:
             entry = self._cache.get(view)
-        if entry and (time.time() - entry[1]) < self._ttl:
-            return entry[0]
+            if entry and (time.time() - entry[1]) < self._ttl:
+                return entry[0]
+            if entry is None:
+                # No board for this view yet: a client has just connected to it. Kick off the
+                # first upstream fetch in the background and answer "starting up" immediately,
+                # so we never query LDBWS until a client is present and the client isn't left
+                # blocking on the upstream call. A failed initial fetch leaves the view empty,
+                # so the next poll retries (and the client keeps showing "starting").
+                if view not in self._inflight:
+                    self._inflight.add(view)
+                    first = not self._started
+                    self._started = True
+                    threading.Thread(
+                        target=self._initial_fetch, args=(view, first), daemon=True
+                    ).start()
+                return self._starting
+        # A stale entry exists: refresh in this request thread, keeping the last good payload
+        # if the upstream call fails (the keep-serving-stale resilience).
         try:
             payload = self._fetch(view)
         except LdbwsError as exc:
-            log.warning("Fetch of view '%s' failed; serving stale: %s", view, exc)
-            return entry[0] if entry else None
+            log.warning("Refresh of view '%s' failed; serving stale: %s", view, exc)
+            return entry[0]
         with self._lock:
             self._cache[view] = (payload, time.time())
         log.info("Refreshed view '%s'.", view)
         return payload
+
+    def _initial_fetch(self, view: str, first: bool) -> None:
+        """Run a view's first upstream fetch off the request thread (see :meth:`get`)."""
+        if first:
+            log.info("First client connected; starting up — querying LDBWS for current state.")
+        try:
+            payload = self._fetch(view)
+        except LdbwsError as exc:
+            log.warning("Initial fetch of '%s' failed; will retry on next poll: %s", view, exc)
+            payload = None
+        with self._lock:
+            if payload is not None:
+                self._cache[view] = (payload, time.time())
+            self._inflight.discard(view)
+        if payload is not None:
+            log.info("View '%s' ready.", view)
 
 
 def _make_handler(cache: ViewCache) -> type[BaseHTTPRequestHandler]:
@@ -160,11 +216,9 @@ def _make_handler(cache: ViewCache) -> type[BaseHTTPRequestHandler]:
             path = parsed.path.rstrip("/") or "/"
             if path == "/board":
                 view = parse_qs(parsed.query).get("view", ["departures"])[0]
-                payload = cache.get(view)
-                if payload is None:
-                    self._send(503, b'{"error":"no board yet"}')
-                else:
-                    self._send(200, payload)
+                # Always 200: a cold view yields a "starting" board (never a 503), so the
+                # simple poll-and-render clients don't have to treat startup as an error.
+                self._send(200, cache.get(view))
             elif path == "/healthz":
                 self._send(200, json.dumps({"ok": True, "views": list(VIEWS)}).encode("utf-8"))
             else:
@@ -187,10 +241,12 @@ def serve(
     crs: str | None = None,
     board_kwargs: dict | None = None,
 ) -> None:
-    """Run the JSON board server until interrupted (Ctrl+C) or SIGTERM (``docker stop``)."""
-    cache = ViewCache(service, crs=crs, board_kwargs=board_kwargs, ttl=interval)
-    cache.get("departures")  # prime the default view so the first request is ready
+    """Run the JSON board server until interrupted (Ctrl+C) or SIGTERM (``docker stop``).
 
+    Returns straight away with an empty cache: no LDBWS call is made until the first client
+    connects (see :class:`ViewCache`), so the server can sit idle without burning API quota.
+    """
+    cache = ViewCache(service, crs=crs, board_kwargs=board_kwargs, ttl=interval)
     httpd = ThreadingHTTPServer((host, port), _make_handler(cache))
 
     def _shutdown(signum: int, _frame: object) -> None:
@@ -199,7 +255,8 @@ def serve(
 
     previous = signal.signal(signal.SIGTERM, _shutdown)
     log.info(
-        "Serving departure board on http://%s:%d/board (views: %s)",
+        "Serving departure board on http://%s:%d/board (views: %s) — idle until a client "
+        "connects.",
         host, port, ", ".join(VIEWS),
     )
     try:
