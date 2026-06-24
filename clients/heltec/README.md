@@ -12,26 +12,44 @@ the board-config factory).
 ## How it works
 
 1. On boot, connects to WiFi (up to 5 attempts, with on-screen progress).
-2. Every `POLL_INTERVAL_S` (default 5s) does a tiny HTTP GET of `/board`.
+2. Every `POLL_INTERVAL_S` (default 5s) does a tiny HTTP GET of `/board?view=<mode>` for the
+   current PRG view (see **View modes**).
 3. Renders the board into the framebuffer and **only does the ~1.5s e-ink refresh when the
    frame actually changed** (a framebuffer byte-compare). The board changes ~once a minute,
    so the panel stays still most of the time — no ghosting/wear from needless refreshes.
 4. Keeps showing the last good board if a fetch fails; reconnects WiFi if it drops.
 
-## Display layout (250×122, black-on-white)
+## View modes (PRG button)
+
+The **PRG button (GPIO0)** cycles three views. The press is caught by a **pin interrupt**, so it
+takes effect on the next ~5s poll **whether or not the board data changed** — a press landing
+during the blocking fetch or the e-ink refresh is latched, not dropped:
+
+1. **Departures** — landscape, London-bound only (the server's `DIRECTION_FILTER_CRS`), with a
+   calling-points footer.
+2. **All departures** — portrait, every direction.
+3. **Arrivals** — portrait, by origin.
+
+## Display layout
+
+Landscape **departures** (250×122, black-on-white):
 
 ```
-Earlswood (Surrey)   14:52      <- header: station + board time (dotmatrix16)
---------------------------------
-14:55 Peterborough    P1  15:03 <- up to 6 departures (dotmatrix10):
-15:12 Bedford          -  Cancelled    time | destination | platform | status
-15:25 Ldn St Pancras  P1  On time
-...
---------------------------------
-Calling: Redhill, Merstham,...  <- calling-at line for the marked service (static)
+Earlswood (Surrey)          14:52   <- header: station + clock (dotmatrix9)
+-----------------------------------
+Peterborough         P1 14:55       <- up to 5 rows (dotmatrix19): station left,
+Bedford                  cancelled      platform + time right-justified
+Ldn St Pancras       P1 15:25
+Cambridge            P3 15:42 :48   <- delayed: scheduled + revised minute
+-----------------------------------
+Calling: Redhill, Merstham, ...     <- calling-at for the first listed service (dotmatrix9)
 ```
 
-Status is **text** (`On time` / `Cancelled` / a revised `HH:MM`) since e-ink has no colour.
+The portrait views (**all** / **arrivals**) render into a 121×250 canvas and rotate 90° CW onto
+the panel, using dotmatrix9 with the same right-justified `station … P# HH:MM` rows.
+
+Status lives in the time column (e-ink has no colour): **on time** = scheduled time; **delayed**
+= `HH:MM :MM` (scheduled, then the revised minute); **cancelled** = `cancelled`, right-justified.
 
 ## Files
 
@@ -42,11 +60,10 @@ Status is **text** (`On time` / `Cancelled` / a revised `HH:MM`) since e-ink has
 | `config.py` | WiFi creds, `SERVER_URL`, poll interval — **gitignored**, copy from `config.py.example` |
 | `lib/depg0213.py` | SSD1682 e-ink driver (FrameBuffer subclass; vendored from ESP) |
 | `lib/writer.py` | Peter Hinch `Writer` (renders bitmap fonts) |
-| `lib/dotmatrix10/16/20.py` | Dot Matrix bitmap fonts (generated from `Fonts/dot-matrix-regular.ttf`) |
-| `tools/gen_fonts.ps1` | Regenerate the font modules from the TTF |
+| `lib/dotmatrix9.py`, `lib/dotmatrix19.py` | Dot Matrix fonts — 9 = header/footer/portrait, 19 = landscape rows (generated from `Fonts/dot-matrix-regular.ttf`) |
+| `tools/gen_fonts.ps1` | Regenerate the font modules from the TTF (sizes 9 and 19) |
 | `tools/font_to_py.py` | Vendored TTF→MicroPython converter (Peter Hinch, MIT) |
-| `demo.py` | Static font/capacity demo (every-cell grid + max-chars readout) |
-| `_smoketest.py` | Bounded on-device bring-up test |
+| `tools/tabular_digits.py` | Pads narrow digits (e.g. "1") so numerals share a width and times line up |
 | `deploy.ps1` | Copy everything to the device |
 
 ## Configuration
@@ -72,7 +89,6 @@ Labs CP210x (here: **COM3**).
 ```powershell
 pwsh tools/gen_fonts.ps1                # (re)generate fonts if needed
 pwsh deploy.ps1 -Port COM3              # copy lib + app + config to the device
-mpremote connect COM3 run _smoketest.py # optional: bounded bring-up check
 ```
 
 To autostart on power-up, deploy the app as `main.py`:

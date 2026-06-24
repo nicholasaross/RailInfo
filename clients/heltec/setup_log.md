@@ -24,16 +24,14 @@ mpremote connect COM3 exec "import sys; print(sys.implementation)"
 ```
 
 ## 3. Dot Matrix font → MicroPython bitmap modules
-Converted `Fonts/dot-matrix-regular.ttf` with Peter Hinch's `font_to_py.py`
-(`-x` horizontal map, `-f` fixed width). See `tools/gen_fonts.ps1`.
+Converted `Fonts/dot-matrix-regular.ttf` with Peter Hinch's `font_to_py.py`, **proportional**
+(`-x`), then `tools/tabular_digits.py` pads narrow digits (e.g. "1") so numerals share a width
+and times line up. Driven by `tools/gen_fonts.ps1`.
 
-Measured on-device capacity (250×122, via `demo.py`):
-
-| Font | Cell (px) | Cols (X) | Rows (Y) | Total cells |
-|------|-----------|----------|----------|-------------|
-| dotmatrix10 | 7×10 | 35 | 12 | 420 |
-| dotmatrix16 | 10×17 | 25 | 7 | 175 |
-| dotmatrix20 | 13×19 | 19 | 6 | 114 |
+The client ships **two** sizes (the dot-matrix grid only lands cleanly on whole pixels at
+certain heights — 8/9, 16–19, 25–27, 34): **dotmatrix9** (header, footer, portrait rows) and
+**dotmatrix19** (landscape departure rows). The size-exploration leftovers (10/16/17/18/20–30
+and the `dm*mono` experiments) have been removed.
 
 ## 4. Driver
 `lib/depg0213.py` vendored from the ESP repo and refactored to **subclass
@@ -47,6 +45,16 @@ SSD1682 command sequence unchanged. Full refresh ~1.5s.
   and skipped the refresh. ✓
 - Full `railinfo_client.py` loop — polls every 5s; logs `panel refreshed` only when the frame
   changes (~once/min), else `frame unchanged, skip refresh`. ✓
+
+## 6. Final client behaviour
+- **Views (PRG / GPIO0):** a pin **interrupt** cycles departures (landscape) → all departures
+  (portrait) → arrivals (portrait); a press is honoured on the next ~5s poll regardless of
+  whether the data changed (presses during the fetch/refresh are latched, not dropped).
+- **Rows:** station (destination/origin) left; **platform + time** right-justified (e.g.
+  `P1 14:55`). Status in the time column: on time = scheduled; delayed = `HH:MM :MM`
+  (scheduled + revised minute); cancelled = `cancelled`, right-justified.
+- Deployed as `:main.py` (autostart). The device carries only the production files: `main.py`,
+  `boot.py`, `config.py`, `boards.py`, and `lib/{depg0213,writer,dotmatrix9,dotmatrix19}`.
 
 ## Notes / gotchas
 - The board enumerated on **COM3** (the ESP repo's older unit was COM4) — always confirm the

@@ -102,3 +102,6 @@ processes (ephemeral — see below).
 - Delay notation `HH:MM :MM` on **both** Heltec and Pixoo; `cancelled` (lowercase) right-justified.
 - Direction filter `DIRECTION_FILTER_CRS=LBG` in `.env` drives the default London-bound view.
 - PRG=GPIO0 via **Pin IRQ** (not polling); portrait transpose 90° CW; PortraitCanvas 121×250.
+- Pixoo rows mirror the Heltec's right block (`P# HH:MM`), drawn **flush-right** (`SIZE + 1`
+  absorbs the font side-bearing). On **delayed** rows only, the `P` is dropped (bare platform
+  number) so the 3-letter destination code isn't truncated on the 64px panel.
