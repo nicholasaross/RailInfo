@@ -7,7 +7,8 @@ the code, plus **where we are mid-task** (resume section at the bottom).
 
 Software-only live National Rail departure board (LDBWS REST/JSON via Rail Data Marketplace).
 Four phases: (1) terminal board, (2) Divoom Pixoo 64 push, (3) NAS container, (4) Heltec
-e-ink client. Phases 1, 2, 4 are done; Phase 3 (NAS deploy) is deferred.
+e-ink client. **All four are done** — Phase 3 runs the merged server+Pixoo process as a
+container on the Synology NAS (the live home; the dev box is just for local testing).
 
 Data acquisition is decoupled from presentation behind `railinfo/domain` + `railinfo/service.py`
 (`BoardService`). Renderers/servers depend only on the domain model.
@@ -61,18 +62,45 @@ instead of a board; the real board lands on a later poll.
 - **Network ops need the sandbox disabled** (uv fetching freetype-py; the server's LDBWS calls).
   Serial (mpremote) and loopback curl do not.
 - MicroPython can't resolve hostnames → `clients/heltec/config.py` `SERVER_URL` must be an IP.
-  `config.py` is gitignored (WiFi creds + server IP); dev-box server = `192.168.1.116:8000`.
+  `config.py` is gitignored (WiFi creds + server IP). **Live: the NAS `192.168.1.10:8088`**
+  (dev-box `192.168.1.116:8000` for local testing).
 - Font regen needs freetype-py (cached in uv): `uv run --offline --with freetype-py ...`.
-- Run tests: `uv run --offline pytest` (45 tests incl. `tests/test_server.py`).
+- Run tests: `uv run --offline pytest` (48 tests incl. `tests/test_server.py`).
+
+## NAS deployment (Phase 3)
+
+Live home: the merged process runs as the **`railinfo` container on the Synology NAS** (DS218+,
+amd64) — `Dockerfile` (`python:3.14-slim`, uv, CMD `--serve --pixoo --loop --port 8000`) +
+`docker-compose.yml` (`restart: unless-stopped`). Deploy with **`scripts/deploy-to-nas.ps1`**
+(run on the dev box): `docker build` → `docker save` → `scp` → `docker load`; `-Start` also
+writes a prebuilt-image compose + LF-normalised `.env` and runs compose up. Redeploy:
+`pwsh scripts/deploy-to-nas.ps1 -NasHost <nas> -NasUser <admin> -SkipBuild -Start -HostPort 8088`.
+
+- **Bridge + published port, NOT host networking.** `:8000` is taken by the user's `bindicator`
+  container and `:8080` by `connect3`, so RailInfo publishes **`8088:8000`** (`-HostPort 8088`).
+  Host mode isn't needed — PIXOO_HOST is pinned and bridge NAT reaches the Pixoo `.202` + LDBWS.
+  Side effect: server logs show the bridge gateway `172.23.0.1` as the client IP, not the
+  Heltec's real `192.168.1.139`.
+- **Synology SSH/Docker quirks the script handles** (learned the hard way):
+  - `scp -O` — Synology sshd has no SFTP subsystem ("subsystem request failed on channel 0").
+  - `sudo` can't see `docker` (secure_path) → resolve the full path (`/usr/local/bin/docker`)
+    and call `sudo <path>`. Same for compose.
+  - Synology has **`docker-compose` v1 (hyphenated)**, not the `docker compose` v2 plugin —
+    resolved separately (v1 first); the generated compose keeps `version: "3.8"` for v1.
+  - `docker-compose down` before `up` (a failed recreate leaves the port "already allocated").
+- **Pixoo PicID gotcha at cutover.** The panel silently drops frames whose `PicID` isn't greater
+  than the last it saw (returns `error_code 0`, so **no push error is logged**). Two pushers at
+  once (dev box + NAS during cutover) leave it stuck on the higher-numbered stream; **restart the
+  surviving container** (`docker restart railinfo`) so its `Draw/ResetHttpGifId` re-syncs. Never
+  run two Pixoo pushers at once.
 
 ---
 
 ## RESUME HERE — 2026-06-24
 
-Phase 4 done + polished live. The Heltec runs the fixed client as **autostart `main.py`**;
-sign-off received on the 2026-06-23 UI batch (row order Station/Platform/Time, "cancelled"
-right-justified, portrait edge-clip fix, header separator). Server + Pixoo stream are dev-box
-processes (ephemeral — see below).
+**All four phases done and live.** The merged server+Pixoo process now runs as the `railinfo`
+container on the **Synology NAS** (`192.168.1.10:8088`; see "NAS deployment" above); the Heltec
+polls it and the dev-box processes are retired. The 2026-06-23 UI sign-off still holds.
 
 ### Done this session (2026-06-24)
 - **PRG button fix** (symptom: it only seemed to act when the board data changed). Cause: the
@@ -124,27 +152,35 @@ processes (ephemeral — see below).
   stale `--loop`) + `docker-compose.yml` collapsed to one combined service (split kept as a
   commented alt). Suite **48 green**.
 
-### Run it (dev box — dies if the box sleeps or Claude/terminal closes; auto-restart wrapper helps)
-ONE process now feeds both displays, sharing a single LDBWS fetch (network → **disable sandbox**):
-1. `uv run python -u main.py --serve --pixoo --loop --port 8000` (Pixoo auto-discovers .202;
-   serves /board on :8000 for the Heltec). Idle on the LDBWS side until something displays it.
-2. Heltec autostarts on power; recovers ~5s after the server returns. config.py →
-   `192.168.1.116:8000`; device DHCP `192.168.1.139`. (Re-check dev-box IP with `ipconfig`.)
-   (Split mode still works — `--serve` and `--pixoo --loop` as two processes — but doubles the
-   departures fetch.)
+### Done this session (2026-06-24 — Phase 3 NAS deploy + cutover)
+- **Built + smoke-tested the image** (`railinfo:latest`, linux/amd64): in-container render path,
+  `/healthz`, and `/board` lazy-start all green.
+- **Wrote `scripts/deploy-to-nas.ps1`** (build → save → scp → load over SSH; `-Start` brings it
+  up via compose). Iterated through the Synology quirks now captured in "NAS deployment":
+  `scp -O`, full-path `sudo docker`, `docker-compose` v1, bridge `-HostPort`, `down` before `up`.
+- **Deployed to the NAS** as the `railinfo` container on **`8088`** (`:8000`=bindicator,
+  `:8080`=connect3 were taken). Verified `/healthz` + a real `ready` board from the NAS.
+- **Cut over**: Heltec `config.py` SERVER_URL → `http://192.168.1.10:8088/board` (cp'd to the
+  device, sha-matched, reset); **stopped the dev-box process**. Restarted the NAS container once
+  to clear a Pixoo PicID stall from the dual-push overlap. Both displays live off the NAS.
+
+### Run it
+**Live = the NAS container** (`scripts/deploy-to-nas.ps1`; see "NAS deployment"). The Heltec
+polls `192.168.1.10:8088`; device DHCP `192.168.1.139`.
+
+**Local testing on the dev box** (network → **disable sandbox**; point the Heltec's config.py
+back at `192.168.1.116:8000`, or just curl /board yourself):
+`uv run python -u main.py --serve --pixoo --loop --port 8000` — one process feeds both displays
+from a single LDBWS fetch. (Split mode `--serve` + `--pixoo --loop` still works but doubles the
+departures fetch; dev-box processes die when the box sleeps — the NAS doesn't.)
 
 ### Still pending
-- [ ] **Redeploy the Heltec** to pick up the "Starting up..." screen: `mpremote` cp
-      `railinfo_client.py` → `:main.py` on COM3 (byte-match + remove stale). Optional — the
-      device works without it; it just won't show the startup notice. Validate the lazy-server
-      startup flow on-device after.
+- [ ] Commit `scripts/deploy-to-nas.ps1` (new this session, not yet committed).
 - [ ] **Repo-side** font cleanup (device is done): delete `clients/heltec/lib/`
       `dotmatrix16/17/18/20..30` + `dm16mono/dm18mono/dm19mono`; set `gen_fonts.ps1 $sizes` to
       `9, 19`. (Repo keeps the scratch scripts as source/diagnostics.)
-- [ ] Update `clients/heltec/README.md` + `setup_log.md` (proportional 9/19 fonts, row layout,
-      `HH:MM :MM` notation, PRG **IRQ** modes/portrait, the gen_fonts+tabular_digits flow).
-- [ ] Phase 3 NAS deploy of `railinfo-server` + the Pixoo loop (the permanent home for both
-      dev-box processes) — still deferred.
+- [ ] Review `clients/heltec/setup_log.md` for staleness (the esptool/flash flow). The client
+      `README.md` is current (fonts/layout/IRQ + NAS server topology + "Starting up…").
 
 ### Decisions locked
 - Proportional fonts (NOT monospaced); 9 + 19 only; tabular/centred digits.
@@ -162,3 +198,7 @@ ONE process now feeds both displays, sharing a single LDBWS fetch (network → *
   boards (stale-while-revalidate + coalesced refresh). The Pixoo reads the shared board object
   directly (NOT an HTTP client of `/board`); the JSON contract stays the Heltec's alone. Split
   mode (two processes) still works but doubles the departures fetch.
+- **Phase 3 = that one process as the `railinfo` container on the Synology NAS** (the live home).
+  **Bridge networking + `-HostPort 8088`** publish (NOT host mode; `:8000`/`:8080` are taken by
+  the user's bindicator/connect3). Deploy via `scripts/deploy-to-nas.ps1`. Never run two Pixoo
+  pushers at once (PicID stall) — see "NAS deployment".

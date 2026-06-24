@@ -5,7 +5,7 @@ SSD1682 e-ink). It polls the RailInfo JSON API and renders a live National Rail 
 board in the RailInfo **Dot Matrix** font.
 
 This is the Phase 4 "smarter display": where the Pixoo has frames *pushed* to it, the Heltec
-*pulls* JSON from the RailInfo server (`python main.py --serve`) and renders on-device. It's
+*pulls* JSON from the RailInfo server (the `--serve` JSON API) and renders on-device. It's
 based on the read-only ESP/Bindicator project (WiFi connect/retry, the `depg0213` driver,
 the board-config factory).
 
@@ -18,6 +18,8 @@ the board-config factory).
    frame actually changed** (a framebuffer byte-compare). The board changes ~once a minute,
    so the panel stays still most of the time — no ghosting/wear from needless refreshes.
 4. Keeps showing the last good board if a fetch fails; reconnects WiFi if it drops.
+5. While the (lazy) server is warming up its first fetch it replies `{"status": "starting"}`;
+   the client then shows a brief **"Starting up…"** screen until the real board lands.
 
 ## View modes (PRG button)
 
@@ -75,7 +77,7 @@ cp config.py.example config.py   # then edit
 ```python
 WIFI_SSID = "your-ssid"
 WIFI_PASSWORD = "your-password"
-SERVER_URL = "http://192.168.1.116:8000/board"   # dev box now; NAS IP later. Must be an IP.
+SERVER_URL = "http://192.168.1.10:8088/board"   # the NAS container; an IP, not a hostname
 POLL_INTERVAL_S = 5
 ```
 
@@ -102,15 +104,20 @@ mpremote connect COM3 reset
 
 ## Server side
 
-Run the API the client polls (from the RailInfo repo root):
+The client polls RailInfo's `/board` JSON API. Live, that's the merged **`railinfo` container
+on the NAS** (`--serve --pixoo --loop` — the same process that drives the Pixoo), published on
+port **8088**; deploy it with `scripts/deploy-to-nas.ps1` (see the main README).
+
+For local testing, run it on the dev box from the repo root:
 
 ```bash
 uv run python main.py --serve --port 8000        # serves /board and /healthz
 ```
 
-It refreshes from LDBWS every `--interval` seconds and serves the cached projection, so
-client polls never hit the upstream API. On the NAS it runs as the `railinfo-server`
-service in `docker-compose.yml`.
+The server is **lazy**: it makes no LDBWS call until a client connects, then caches the board
+(stale-while-revalidate), so client polls rarely hit the upstream API. The first poll after an
+idle start returns `{"status": "starting"}`, which the client renders as the "Starting up…"
+screen (above) until the real board lands.
 
 ## Firmware
 

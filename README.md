@@ -148,13 +148,24 @@ renderer — terminal, Pixoo, and the e-ink client's JSON server — shares one 
 - `railinfo/pixoo/` — `device.py` (Divoom HTTP API + LAN discovery) and `runner.py` (loop).
 - `railinfo/server.py` — Phase 4 JSON API (`--serve`); projects the domain model to `/board`.
 - `clients/heltec/` — MicroPython e-ink client (polls the server; see its own README).
-- `tests/` — pytest suite; `scripts/preview_board.py` — offline PNG preview.
+- `tests/` — pytest suite; `scripts/` — `preview_board.py` (offline PNG preview) and
+  `deploy-to-nas.ps1` (build + ship the image to the NAS over SSH).
 
-## Roadmap
+## Deployment (Phase 3 — Synology NAS)
 
-- **Phase 3** (deferred) — containerise the service + Pixoo loop for a Synology NAS, the
-  permanent home for the two dev-box processes. A `docker-compose.yml` with both services
-  (`railinfo-server` and the Pixoo `--loop`) is already in the repo.
+All four phases are done. The merged server+Pixoo process runs as a **container on a Synology
+NAS** (`Dockerfile` + `docker-compose.yml`, `restart: unless-stopped`) — its permanent home,
+surviving reboots instead of living on the dev box. **`scripts/deploy-to-nas.ps1`** builds the
+`linux/amd64` image on the dev box and ships it over SSH (`docker save` → `scp` → `docker
+load`), and with `-Start` brings it up via compose:
+
+```powershell
+pwsh scripts/deploy-to-nas.ps1 -NasHost <nas> -NasUser <admin> -Start -HostPort 8088
+```
+
+It handles the Synology specifics: `scp -O` (no SFTP subsystem), resolving docker's full path
+for `sudo`, `docker-compose` v1 (hyphenated), and a bridge **port publish** (`-HostPort` — host
+mode isn't needed once `PIXOO_HOST` is pinned, so the bridge reaches the Pixoo and LDBWS via NAT).
 
 ## Credits
 
