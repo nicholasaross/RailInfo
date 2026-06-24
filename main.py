@@ -14,6 +14,7 @@ from railinfo.pixoo.device import PixooDevice, PixooError, discover_host
 from railinfo.pixoo.runner import run as run_pixoo
 from railinfo.renderers import terminal
 from railinfo.renderers.pixoo import render_board_image
+from railinfo.server import serve as run_server
 from railinfo.service import BoardService
 
 
@@ -94,6 +95,17 @@ def main() -> int:
     pixoo.add_argument(
         "--preview", metavar="PATH", help="Save a 64x64 PNG preview instead of pushing."
     )
+    server = parser.add_argument_group("JSON server (Phase 4)")
+    server.add_argument(
+        "--serve",
+        action="store_true",
+        help="Run an HTTP server exposing the board as JSON at /board (for the Heltec "
+        "e-ink client). Refreshes data every --interval seconds.",
+    )
+    server.add_argument(
+        "--host", default="0.0.0.0", help="Server bind address (with --serve)."
+    )
+    server.add_argument("--port", type=int, default=8000, help="Server port (with --serve).")
     args = parser.parse_args()
 
     try:
@@ -107,6 +119,9 @@ def main() -> int:
         [c.strip() for c in args.filter.split(",") if c.strip()] if args.filter else None
     )
     direction = _direction_kwargs(args)
+
+    if args.serve:
+        return _run_server(args, service, direction)
 
     if args.pixoo or args.preview:
         return _run_pixoo(args, settings, service, direction)
@@ -144,6 +159,24 @@ def _direction_kwargs(args) -> dict[str, object]:
     if args.from_crs:
         return {"filter_crs": args.from_crs, "filter_type": "from"}
     return {}
+
+
+def _run_server(args, service: BoardService, direction: dict[str, object]) -> int:
+    # Long-running and unattended (alongside the Pixoo loop or on the NAS): send logs to
+    # stdout so they're visible via `docker logs` and the terminal.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    run_server(
+        service,
+        host=args.host,
+        port=args.port,
+        interval=args.interval,
+        crs=args.crs,
+        board_kwargs=direction,
+    )
+    return 0
 
 
 def _run_pixoo(

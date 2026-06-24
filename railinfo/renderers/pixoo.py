@@ -4,7 +4,8 @@ National-Rail dot-matrix look: amber text on black. Layout (64x64):
 
 * rows 0-2  — up to three departures: ``CRS  HH:MM`` (destination code + time, colour =
   status). Codes keep names short so the font stays large and legible. A delayed service
-  shows its revised expected time, not the scheduled one.
+  shows the scheduled time followed by ``:MM`` of the revised minute (e.g. ``13:25 :28``),
+  matching the Heltec board.
 * row ~35   — the "calling at …" line for the first *non-cancelled* departure, scrolled
   horizontally. If that isn't the top row, a ``<`` after its code marks which train it is.
 * rows 47+  — a large centred clock.
@@ -165,13 +166,17 @@ def _choose_stops_index(services: list[Service]) -> int | None:
 
 
 def _headline_time(service: Service) -> str:
-    """Revised time for a delayed service (e.g. "13:28"), else the scheduled time.
+    """Scheduled time, plus " :MM" of the revised minute when delayed (e.g. "13:25 :28").
 
-    ``service.expected`` is "On time"/"Cancelled" or an actual HH:MM revision; only the
-    latter contains a colon, so it stands in for the scheduled time when present.
+    Mirrors the Heltec board's notation. ``service.expected`` is "On time"/"Cancelled" or an
+    actual HH:MM revision; only the latter contains a colon, and only when it also differs
+    from the scheduled time do we append the revised minute.
     """
+    sched = service.time
     expected = service.expected
-    return expected if ":" in expected else service.time
+    if ":" in expected and expected != sched:
+        return f"{sched} :{expected.split(':')[1]}"
+    return sched
 
 
 def _abbreviate(name: str) -> str:

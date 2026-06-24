@@ -1,0 +1,13 @@
+# Copy to config.py (which is gitignored) and fill in your values.
+#
+# NOTE: MicroPython cannot resolve local hostnames, so SERVER_URL must use an IP address
+# (your dev box while testing, or the NAS once the RailInfo --serve container is deployed).
+
+WIFI_SSID = "your-ssid"
+WIFI_PASSWORD = "your-password"
+
+SERVER_URL = "http://192.168.1.10:8000/board"
+
+# How often to poll the server. The panel only does its (~1.5s) e-ink refresh when the
+# rendered frame actually changes, so a short poll stays responsive without thrashing it.
+POLL_INTERVAL_S = 5

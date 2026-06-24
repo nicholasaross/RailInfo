@@ -35,3 +35,22 @@ services:
 
     # Optional: override the default `--loop` (e.g. tune refresh/fps or brightness).
     # command: ["python", "main.py", "--loop", "--fps", "5", "--interval", "30"]
+
+  # Phase 4: JSON board API the Heltec e-ink client polls. Same image, different command.
+  # Independent of the Pixoo push service above — run either or both.
+  railinfo-server:
+    build: .
+    image: railinfo:latest
+    container_name: railinfo-server
+    restart: unless-stopped
+    # host networking so the Heltec can reach the API on the LAN at <nas-ip>:8000.
+    network_mode: host
+    env_file: .env
+    environment:
+      - TZ=Europe/London
+    command: ["python", "main.py", "--serve", "--port", "8000"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

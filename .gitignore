@@ -8,6 +8,8 @@ wheels/
 
 # Config
 .env
+# Heltec client device config (WiFi creds, server IP) - keep the .example only
+clients/heltec/config.py
 
 # Virtual environments
 .venv

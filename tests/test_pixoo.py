@@ -18,14 +18,19 @@ from railinfo.renderers.pixoo import (
 )
 
 
-# --- _headline_time: delayed shows revised time, otherwise scheduled ---------------
+# --- _headline_time: scheduled time, plus the revised minute when delayed ----------
 
 def test_headline_time_on_time_shows_scheduled():
     assert _headline_time(make_service(std="13:25", etd="On time")) == "13:25"
 
 
-def test_headline_time_delayed_shows_revised():
-    assert _headline_time(make_service(std="13:25", etd="13:28")) == "13:28"
+def test_headline_time_delayed_shows_scheduled_plus_revised_minute():
+    assert _headline_time(make_service(std="13:25", etd="13:28")) == "13:25 :28"
+
+
+def test_headline_time_revision_equal_to_scheduled_not_doubled():
+    # A revision matching the scheduled minute shouldn't render "13:25 :25".
+    assert _headline_time(make_service(std="13:25", etd="13:25")) == "13:25"
 
 
 def test_headline_time_cancelled_shows_scheduled():
