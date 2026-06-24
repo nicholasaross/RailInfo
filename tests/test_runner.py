@@ -16,14 +16,6 @@ class _Done(Exception):
     """Sentinel raised from a fake device to break out of the otherwise-infinite loop."""
 
 
-class _FakeService:
-    def __init__(self, board: DepartureBoard) -> None:
-        self.board = board
-
-    def get_departure_board(self, crs=None, with_details=False, **kwargs):
-        return self.board
-
-
 class _FlakyDevice:
     """Fails the first two pushes, succeeds on the third, then stops the loop."""
 
@@ -57,9 +49,10 @@ def test_run_survives_transient_push_failures(monkeypatch):
     # A dropped frame must not crash the process; the loop backs off and carries on.
     monkeypatch.setattr(runner, "_PUSH_BACKOFF", 0.0)
     device = _FlakyDevice()
+    board = _board()
 
     with pytest.raises(_Done):  # the 4th push is our deliberate loop-breaker
-        runner.run(_FakeService(_board()), device, crs="ELD", refresh=999, fps=1000)
+        runner.run(lambda: board, device, fps=1000)
 
     assert device.pushes == 4  # 2 failures + 1 success + the sentinel stop
 

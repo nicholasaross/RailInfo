@@ -1,5 +1,5 @@
-# RailInfo — live departure board pushed to a Pixoo 64.
-# Single long-running, port-less outbound client: `python main.py --loop`.
+# RailInfo — live departure board: serves the JSON API and streams to a Pixoo 64 from one
+# process (`python main.py --serve --pixoo --loop`), sharing one LDBWS fetch for both.
 # Target: Synology DS218+ (Intel Celeron J3355) → build for linux/amd64.
 
 # --- builder: resolve the locked dependency set into a self-contained venv ----------
@@ -45,5 +45,6 @@ COPY main.py ./
 USER railinfo
 
 # Station, API keys, PIXOO_HOST and TZ all come from the environment at runtime
-# (see docker-compose.yml). --loop streams until SIGTERM (handled gracefully).
-CMD ["python", "main.py", "--loop"]
+# (see docker-compose.yml). Serves /board on :8000 and streams to the Pixoo, both off one
+# shared board cache; stops cleanly on SIGTERM.
+CMD ["python", "main.py", "--serve", "--pixoo", "--loop", "--port", "8000"]

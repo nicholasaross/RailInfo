@@ -100,6 +100,21 @@ def render_board_image(board: DepartureBoard, *, scroll: int = 0, now: datetime 
     return _threshold(image)
 
 
+def render_starting_image(now: datetime | None = None) -> Image.Image:
+    """A minimal 'starting' placeholder shown until the first board fetch lands (cold start).
+
+    The merged server fetches lazily, so for ~2s after launch there's no board yet; the Pixoo
+    shows this (a label + the clock) instead of a blank panel.
+    """
+    image = Image.new("RGB", (SIZE, SIZE), BLACK)
+    draw = ImageDraw.Draw(image)
+    text = "starting"
+    width = draw.textlength(text, font=_font(_BODY_FONT))
+    draw.text(((SIZE - width) // 2, 2), text, font=_font(_BODY_FONT), fill=AMBER)
+    _draw_clock(draw, now or datetime.now())
+    return _threshold(image)
+
+
 def _threshold(image: Image.Image) -> Image.Image:
     """Snap each pixel to fully-on/fully-off so no antialiasing fringe reaches the panel.
 

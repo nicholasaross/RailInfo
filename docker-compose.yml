@@ -2,6 +2,8 @@
 # Deploy as a Container Manager "Project" pointing at this file, or run `docker compose up -d`.
 
 services:
+  # One process serves the Heltec's JSON API on :8000 AND streams to the Pixoo, sharing a
+  # single in-memory board cache so the London-bound board is fetched from LDBWS once for both.
   railinfo:
     build: .
     image: railinfo:latest
@@ -10,8 +12,8 @@ services:
     restart: unless-stopped
 
     # host networking is the least-friction way to reach the Pixoo on the LAN (and lets
-    # Divoom discovery work if you ever drop PIXOO_HOST). The container publishes no ports.
-    # Bridge alternative: remove this line — PIXOO_HOST below makes the panel reachable.
+    # Divoom discovery work if you ever drop PIXOO_HOST), and exposes the JSON API on
+    # <nas-ip>:8000 for the Heltec. The container publishes no ports of its own.
     network_mode: host
 
     # Secrets and station config live in .env, kept out of the image:
@@ -25,6 +27,10 @@ services:
       # Pin the panel to a DHCP-reserved IP rather than relying on in-container discovery.
       - PIXOO_HOST=192.168.1.202
 
+    # Serve the API and stream to the Pixoo from one shared fetch (matches the Dockerfile CMD;
+    # restated here to be explicit / easy to tweak, e.g. --fps or --interval).
+    command: ["python", "main.py", "--serve", "--pixoo", "--loop", "--port", "8000"]
+
     # Cap log growth — this runs 24/7 and the DS218+ has limited storage; without this the
     # json-file log grows unbounded.
     logging:
@@ -33,24 +39,24 @@ services:
         max-size: "10m"
         max-file: "3"
 
-    # Optional: override the default `--loop` (e.g. tune refresh/fps or brightness).
-    # command: ["python", "main.py", "--loop", "--fps", "5", "--interval", "30"]
-
-  # Phase 4: JSON board API the Heltec e-ink client polls. Same image, different command.
-  # Independent of the Pixoo push service above — run either or both.
-  railinfo-server:
-    build: .
-    image: railinfo:latest
-    container_name: railinfo-server
-    restart: unless-stopped
-    # host networking so the Heltec can reach the API on the LAN at <nas-ip>:8000.
-    network_mode: host
-    env_file: .env
-    environment:
-      - TZ=Europe/London
-    command: ["python", "main.py", "--serve", "--port", "8000"]
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+  # --- Alternative: run the two displays as SEPARATE containers ------------------------
+  # Prefer the single `railinfo` service above — it makes one shared LDBWS fetch. Split them
+  # only if you want to run/restart the Pixoo and the Heltec API independently; doing so
+  # doubles the upstream calls for the shared London-bound board. To split: set the command on
+  # `railinfo` above to ["python", "main.py", "--pixoo", "--loop"] and uncomment the below.
+  #
+  # railinfo-server:
+  #   build: .
+  #   image: railinfo:latest
+  #   container_name: railinfo-server
+  #   restart: unless-stopped
+  #   network_mode: host          # Heltec reaches the API at <nas-ip>:8000
+  #   env_file: .env
+  #   environment:
+  #     - TZ=Europe/London
+  #   command: ["python", "main.py", "--serve", "--port", "8000"]
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"

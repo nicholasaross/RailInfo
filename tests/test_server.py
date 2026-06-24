@@ -1,4 +1,4 @@
-"""Tests for the Phase 4 JSON server: projection, per-view caching, and HTTP serving."""
+"""Tests for the Phase 4 JSON server: projection, the shared board cache, and HTTP serving."""
 
 from __future__ import annotations
 
@@ -6,27 +6,34 @@ import json
 import threading
 import time
 import urllib.request
-from http.server import ThreadingHTTPServer
 
 from conftest import make_service
 
 from railinfo.domain.models import CallingPoint, DepartureBoard
 from railinfo.ldbws.client import LdbwsError
-from railinfo.server import ViewCache, _make_handler, _stops_index, to_client_dict
+from railinfo.server import BoardCache, _project, _stops_index, make_server, to_client_dict
 
 
-def _ready(cache: ViewCache, view: str = "departures") -> dict:
-    """Touch a view and drive its background initial fetch to completion, returning the board.
+def _ready(cache: BoardCache, view: str = "departures") -> DepartureBoard:
+    """Touch a view and drive its background fetch to completion, returning the board.
 
-    The first ``get`` returns a "starting" placeholder and kicks off the fetch on a thread;
-    poll until the real board (``status: "ready"``) lands.
+    The first ``get_board`` returns None and kicks off the fetch on a thread; poll until the
+    board lands.
     """
     for _ in range(200):
-        data = json.loads(cache.get(view))
-        if data.get("status") != "starting":
-            return data
+        board = cache.get_board(view)
+        if board is not None:
+            return board
         time.sleep(0.005)
     raise AssertionError("view never became ready: " + view)
+
+
+def _settle(cache: BoardCache, view: str = "departures") -> None:
+    """Wait until no fetch is in flight for a view (e.g. after a failing refresh)."""
+    for _ in range(200):
+        if view not in cache._inflight:
+            return
+        time.sleep(0.005)
 
 
 def _dep_board() -> DepartureBoard:
@@ -74,6 +81,12 @@ class _FakeService:
         return _arr_board()
 
 
+class _SlowService(_FakeService):
+    def get_departure_board(self, crs=None, with_details=False, **kwargs) -> DepartureBoard:
+        time.sleep(0.1)  # hold the fetch open so concurrent reads overlap a single call
+        return super().get_departure_board(crs, with_details, **kwargs)
+
+
 class _FailingService:
     def get_departure_board(self, crs=None, with_details=False, **kwargs):
         raise LdbwsError("upstream down")
@@ -108,38 +121,62 @@ def test_to_client_dict_arrivals_uses_origin_and_arrival_time():
     assert "calling_at" not in data         # portrait views omit calling points
 
 
-def test_cache_starts_lazily_then_ttl_then_keep_stale():
+def test_project_selects_view_shape():
+    assert "calling_at" in json.loads(_project("departures", _dep_board()))  # landscape
+    assert "calling_at" not in json.loads(_project("all", _dep_board()))     # portrait list
+
+
+def test_cache_starts_lazily_then_serves_board():
     svc = _FakeService()
-    cache = ViewCache(svc, ttl=999)
-    assert json.loads(cache.get("departures"))["status"] == "starting"  # first touch: lazy
-    data = _ready(cache, "departures")  # background initial fetch lands
-    assert data["status"] == "ready" and svc.dep_calls == 1
-    good = cache.get("departures")
-    cache.get("departures")  # within TTL -> served from cache, no new fetch
+    cache = BoardCache(svc, ttl=999)
+    assert cache.get_board("departures") is None  # lazy: kicks off the fetch, no board yet
+    board = _ready(cache, "departures")           # background fetch lands
+    assert board.location_name == "Earlswood" and svc.dep_calls == 1
+    cache.get_board("departures")  # within TTL -> served from cache, no new fetch
     assert svc.dep_calls == 1
 
-    cache._ttl = 0  # force staleness; failing service must keep the last good payload
-    cache._service = _FailingService()
-    assert cache.get("departures") == good
+
+def test_cache_keeps_last_board_on_failure():
+    svc = _FakeService()
+    cache = BoardCache(svc, ttl=999)
+    good = _ready(cache, "departures")
+    cache._ttl = 0  # force staleness
+    cache._service = _FailingService()  # the next refresh fails
+    assert cache.get_board("departures") is good  # stale board served while a refresh runs
+    _settle(cache, "departures")  # the background refresh fails and clears inflight
+    assert cache.get_board("departures") is good  # last good board retained
+
+
+def test_cache_coalesces_concurrent_stale_reads():
+    # Many rapid reads while one fetch is in flight must trigger only ONE upstream call -- this
+    # is what lets the ~5 fps Pixoo poll share the server's fetch instead of multiplying it.
+    svc = _SlowService()
+    cache = BoardCache(svc, ttl=999)
+    for _ in range(10):
+        assert cache.get_board("departures") is None  # all land during the single fetch
+        time.sleep(0.002)  # 10 x 2ms << the 100ms fetch, so they overlap it
+    _ready(cache, "departures")
+    assert svc.dep_calls == 1
 
 
 def test_cache_views_are_independent():
     svc = _FakeService()
-    cache = ViewCache(svc, ttl=999)
+    cache = BoardCache(svc, ttl=999)
     _ready(cache, "all")
     arr = _ready(cache, "arrivals")
     assert svc.dep_calls == 1 and svc.arr_calls == 1
-    assert arr["services"][0]["destination"] == "London Bridge"  # origin
+    data = json.loads(_project("arrivals", arr))
+    assert data["services"][0]["destination"] == "London Bridge"  # origin shown as the label
 
 
 def _serve(cache):
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(cache))
+    httpd = make_server(cache, host="127.0.0.1", port=0)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     return httpd
 
 
 def test_http_serves_views_and_health():
-    cache = ViewCache(_FakeService(), ttl=999)
+    cache = BoardCache(_FakeService(), ttl=999)
     _ready(cache, "departures")  # drive the lazy initial fetches before hitting the API
     _ready(cache, "arrivals")
     httpd = _serve(cache)
@@ -159,7 +196,7 @@ def test_http_serves_views_and_health():
 def test_http_starting_before_first_board():
     # A cold view answers 200 with a "starting" board (not a 503), so the poll-and-render
     # clients treat startup as a normal frame. A failing upstream just keeps it "starting".
-    httpd = _serve(ViewCache(_FailingService(), ttl=999))
+    httpd = _serve(BoardCache(_FailingService(), ttl=999))
     port = httpd.server_address[1]
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/board", timeout=5) as r:

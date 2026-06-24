@@ -16,13 +16,17 @@ Data acquisition is decoupled from presentation behind `railinfo/domain` + `rail
 
 - `railinfo/service.py` — `BoardService`: fetch + map LDBWS → domain. The seam everything wraps.
 - `railinfo/renderers/pixoo.py` — 64×64 Pillow render (Phase 2), Dot Matrix TTF, thresholded.
-- `railinfo/pixoo/` — Divoom device + hardened push `runner.py`.
+- `railinfo/pixoo/` — Divoom device + hardened push `runner.py`. **`run(get_board, device,
+  fps)`** pulls the current board from a provider (the shared `BoardCache`) each frame and
+  never fetches LDBWS itself; shows a "starting" placeholder until the first board lands.
 - `railinfo/server.py` — **Phase 4 JSON API** (stdlib `http.server`). `python main.py --serve`.
   Views via `?view=`: `departures` (default, London-bound, with calling points),
-  `all` (every direction), `arrivals` (by origin). **Lazy on connect**: no LDBWS call at
-  startup — the first request for a view returns `{"status":"starting"}` and fetches that view
-  on a background thread; later polls get the real board (`"status":"ready"`). Per-view TTL
-  cache after that, keep-stale on error. `docker-compose.yml` has a `railinfo-server` service.
+  `all` (every direction), `arrivals` (by origin). **`BoardCache`** holds the domain
+  `DepartureBoard` per view (not JSON): **lazy on connect** (first request → `{"status":
+  "starting"}` + background fetch; later polls get `"status":"ready"`), then
+  **stale-while-revalidate** with coalesced refresh (one fetch in flight per view). `_project`
+  renders each view's JSON; `make_server` builds the server headless so it can share a process
+  + cache with the Pixoo loop (`--serve --pixoo --loop`) — one LDBWS fetch feeds both displays.
 - `clients/heltec/` — **Phase 4 MicroPython client** for the Heltec Wireless Paper V1.2.
 
 ## Heltec client (`clients/heltec/`)
@@ -103,13 +107,31 @@ processes (ephemeral — see below).
 - **Docs**: README gained a real **Phase 4** section + the run-both-displays commands; fixed the
   stale Pixoo delay notation. CLAUDE.md architecture/decisions updated. Suite **45 green**.
 
-### Run it (dev box — both die if the box sleeps or Claude/terminal closes; auto-restart wrapper helps)
-Two independent processes populate the two clients (Heltec ← server; Pixoo ← direct LDBWS):
-1. Server for the Heltec (network → **disable sandbox**): `uv run python -u main.py --serve --port 8000`
-   — now idle until the Heltec connects (queries LDBWS lazily, not at startup).
-2. Pixoo stream (network → **disable sandbox**): `uv run python -u main.py --pixoo --loop` (auto-discovers .202)
-3. Heltec autostarts on power; recovers ~5s after the server returns. config.py →
+### Done this session (2026-06-24 — server merge)
+- **Merged the JSON server and the Pixoo loop into one process** to halve LDBWS calls: the
+  `departures` board was being fetched twice — once by `--serve` for the Heltec, once by the
+  Pixoo `--loop`, identically. Now `main.py --serve --pixoo --loop` runs both sharing one
+  `BoardCache`. `_run_combined` runs the HTTP server in a daemon thread + the Pixoo loop on the
+  main thread (which owns SIGTERM via `runner._stop_requested`); Ctrl-C/SIGTERM stop both.
+- **`ViewCache` → `BoardCache`**: caches domain `DepartureBoard`s (not JSON) via `get_board`;
+  **stale-while-revalidate** + coalesced background refresh (`_inflight`) so the ~5fps Pixoo
+  poll can't fan out into duplicate fetches, and neither consumer blocks. Projection moved to
+  `_project(view, board)`; `make_server` factored out of `serve`.
+- **`runner.run(get_board, device, fps)`** replaced `run(service, …, refresh, board_kwargs)`;
+  pulls the cached board each frame, shows `render_starting_image()` (new in `pixoo.py`) until
+  the first board lands. Pixoo-only `--loop` routes through a `BoardCache` too.
+- **Heltec JSON contract unchanged** — no device re-deploy needed. `Dockerfile` CMD (was the
+  stale `--loop`) + `docker-compose.yml` collapsed to one combined service (split kept as a
+  commented alt). Suite **48 green**.
+
+### Run it (dev box — dies if the box sleeps or Claude/terminal closes; auto-restart wrapper helps)
+ONE process now feeds both displays, sharing a single LDBWS fetch (network → **disable sandbox**):
+1. `uv run python -u main.py --serve --pixoo --loop --port 8000` (Pixoo auto-discovers .202;
+   serves /board on :8000 for the Heltec). Idle on the LDBWS side until something displays it.
+2. Heltec autostarts on power; recovers ~5s after the server returns. config.py →
    `192.168.1.116:8000`; device DHCP `192.168.1.139`. (Re-check dev-box IP with `ipconfig`.)
+   (Split mode still works — `--serve` and `--pixoo --loop` as two processes — but doubles the
+   departures fetch.)
 
 ### Still pending
 - [ ] **Redeploy the Heltec** to pick up the "Starting up..." screen: `mpremote` cp
@@ -135,5 +157,8 @@ Two independent processes populate the two clients (Heltec ← server; Pixoo ←
   drop platform → drop `:MM`. (`_choose_layout` / `_right_candidates` in `pixoo.py`.)
 - Server is **lazy on connect** (no LDBWS at startup); first request per view → `status:
   "starting"` + background fetch. Clients render "starting" as a notice, not an error.
-- Pixoo stays a **direct** LDBWS consumer (`--pixoo --loop`), not a client of `--serve`; the
-  server feeds only the Heltec. "Populate both clients" = run both processes.
+- **Server + Pixoo run as ONE process** sharing a `BoardCache` (`--serve --pixoo --loop`) — the
+  `departures` board is fetched from LDBWS once for both displays. The cache stores domain
+  boards (stale-while-revalidate + coalesced refresh). The Pixoo reads the shared board object
+  directly (NOT an HTTP client of `/board`); the JSON contract stays the Heltec's alone. Split
+  mode (two processes) still works but doubles the departures fetch.

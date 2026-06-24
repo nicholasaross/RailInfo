@@ -106,13 +106,17 @@ makes no API calls — whenever nothing is displaying it.
 
 ### Run both displays
 
-The e-ink board is fed by the server; the Pixoo is driven by the `--loop` streamer, which
-calls LDBWS directly. They're independent processes — run both to populate both clients:
+One process serves the Heltec's JSON API **and** streams to the Pixoo, sharing a single board
+cache — so the London-bound board is fetched from LDBWS **once** and used by both, instead of
+each display fetching it independently:
 
 ```bash
-uv run python -u main.py --serve --port 8000   # JSON API the Heltec e-ink board polls
-uv run python -u main.py --pixoo --loop         # streams frames to the Pixoo 64
+uv run python -u main.py --serve --pixoo --loop --port 8000
 ```
+
+`--interval` sets the shared cache TTL (default 30s); `--fps` the Pixoo scroll rate. You can
+still run either side alone — `--serve` (API only) or `--pixoo --loop` (Pixoo only) — but
+together in one process is what avoids the duplicate upstream fetch.
 
 The Heltec can't resolve hostnames, so set the server's LAN IP (not a name) in
 `clients/heltec/config.py`. See the [client README](clients/heltec/README.md) for flashing,

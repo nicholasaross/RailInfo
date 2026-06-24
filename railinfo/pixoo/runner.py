@@ -1,4 +1,4 @@
-"""Drive the Pixoo: refresh board data periodically while animating the scroll."""
+"""Drive the Pixoo: render and push frames from a shared board source, animating the scroll."""
 
 from __future__ import annotations
 
@@ -8,10 +8,9 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
-from railinfo.ldbws.client import LdbwsError
+from railinfo.domain.models import DepartureBoard
 from railinfo.pixoo.device import PixooDevice, PixooError, discover_host
-from railinfo.renderers.pixoo import render_board_image
-from railinfo.service import BoardService
+from railinfo.renderers.pixoo import render_board_image, render_starting_image
 
 _SCROLL_STEP = 3
 _PUSH_BACKOFF = 5.0  # seconds to wait after a failed frame push before trying again
@@ -21,41 +20,37 @@ log = logging.getLogger(__name__)
 
 
 def run(
-    service: BoardService,
+    get_board: Callable[[], DepartureBoard | None],
     device: PixooDevice,
     *,
-    crs: str | None = None,
-    refresh: float = 30.0,
     fps: float = 5.0,
-    board_kwargs: dict[str, object] | None = None,
 ) -> None:
     """Continuously render and push frames until interrupted or asked to stop.
 
-    Built to run unattended (e.g. in a container): a dropped LDBWS refresh keeps showing
-    the last good board, and a failed frame push backs off and eventually re-discovers the
-    panel rather than crashing the process. Stops cleanly on Ctrl+C (SIGINT) or SIGTERM
+    ``get_board`` returns the current departures board (or None while the first fetch is still
+    in flight). Data fetching and caching are the caller's concern — typically a shared
+    :class:`~railinfo.server.BoardCache` — so this loop never calls LDBWS itself, never blocks
+    on it, and shares one upstream fetch with the JSON server when they run in one process.
+
+    Built to run unattended (e.g. in a container): a failed frame push backs off and eventually
+    re-discovers the panel rather than crashing. Stops cleanly on Ctrl+C (SIGINT) or SIGTERM
     (``docker stop``), so cleanup runs and the container exits 0 instead of being killed.
     """
     frame_interval = 1.0 / fps if fps > 0 else 0.2
     scroll = 0
-    bk = board_kwargs or {}  # e.g. directional filter_crs/filter_type from the CLI
-    board = service.get_departure_board(crs, with_details=True, **bk)
-    last_refresh = time.monotonic()
     push_failures = 0
 
     with _stop_requested() as should_stop:
         while not should_stop():
-            now = time.monotonic()
-            if now - last_refresh >= refresh:
-                try:
-                    board = service.get_departure_board(crs, with_details=True, **bk)
-                except LdbwsError as exc:
-                    log.warning("Board refresh failed; keeping last board: %s", exc)
-                last_refresh = now
-
+            board = get_board()
             frame_start = time.monotonic()
+            image = (
+                render_board_image(board, scroll=scroll)
+                if board is not None
+                else render_starting_image()
+            )
             try:
-                device.push_image(render_board_image(board, scroll=scroll))
+                device.push_image(image)
             except PixooError as exc:
                 push_failures += 1
                 log.warning(

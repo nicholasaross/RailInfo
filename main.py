@@ -7,6 +7,7 @@ import dataclasses
 import json
 import logging
 import sys
+import threading
 
 from railinfo.config import ConfigError, Settings, load_settings
 from railinfo.ldbws.client import LdbwsError
@@ -14,7 +15,7 @@ from railinfo.pixoo.device import PixooDevice, PixooError, discover_host
 from railinfo.pixoo.runner import run as run_pixoo
 from railinfo.renderers import terminal
 from railinfo.renderers.pixoo import render_board_image
-from railinfo.server import serve as run_server
+from railinfo.server import BoardCache, make_server, serve as run_server
 from railinfo.service import BoardService
 
 
@@ -101,7 +102,8 @@ def main() -> int:
         action="store_true",
         help="Run an HTTP server exposing the board as JSON at /board (for the Heltec "
         "e-ink client). Queries LDBWS lazily on client demand (idle until one connects); "
-        "--interval sets the per-view cache TTL.",
+        "--interval sets the per-view cache TTL. Combine with --pixoo --loop to also stream "
+        "to the Pixoo from the same cache (one shared LDBWS fetch feeds both).",
     )
     server.add_argument(
         "--host", default="0.0.0.0", help="Server bind address (with --serve)."
@@ -120,6 +122,9 @@ def main() -> int:
         [c.strip() for c in args.filter.split(",") if c.strip()] if args.filter else None
     )
     direction = _direction_kwargs(args)
+
+    if args.serve and args.pixoo:
+        return _run_combined(args, settings, service, direction)
 
     if args.serve:
         return _run_server(args, service, direction)
@@ -162,13 +167,30 @@ def _direction_kwargs(args) -> dict[str, object]:
     return {}
 
 
-def _run_server(args, service: BoardService, direction: dict[str, object]) -> int:
-    # Long-running and unattended (alongside the Pixoo loop or on the NAS): send logs to
-    # stdout so they're visible via `docker logs` and the terminal.
+def _configure_logging(*, quiet_httpx: bool) -> None:
+    """Send INFO logs to stdout (visible via `docker logs` and the terminal).
+
+    When a Pixoo loop is running, silence httpx/httpcore: they log every HTTP request at INFO,
+    which at ~5 fps would flood the log (and bury the cache's own refresh lines).
+    """
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    if quiet_httpx:
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
+def _resolve_pixoo_host(args, settings: Settings) -> str | None:
+    """Pixoo IP from --pixoo-host, else PIXOO_HOST in .env, else Divoom LAN discovery."""
+    return args.pixoo_host or settings.pixoo_host or discover_host()
+
+
+def _run_server(args, service: BoardService, direction: dict[str, object]) -> int:
+    # Long-running and unattended (on the NAS): send logs to stdout so they're visible via
+    # `docker logs` and the terminal. httpx stays at INFO here (no per-frame flooding).
+    _configure_logging(quiet_httpx=False)
     run_server(
         service,
         host=args.host,
@@ -180,21 +202,59 @@ def _run_server(args, service: BoardService, direction: dict[str, object]) -> in
     return 0
 
 
+def _run_combined(
+    args, settings: Settings, service: BoardService, direction: dict[str, object]
+) -> int:
+    """Serve the JSON API and stream to the Pixoo from one process and one shared board cache,
+    so the London-bound board is fetched from LDBWS once and used by both displays."""
+    _configure_logging(quiet_httpx=True)
+    host = _resolve_pixoo_host(args, settings)
+    if not host:
+        print(
+            "Could not find a Pixoo on the network. Set PIXOO_HOST in .env or pass "
+            "--pixoo-host.",
+            file=sys.stderr,
+        )
+        return 1
+
+    cache = BoardCache(service, crs=args.crs, board_kwargs=direction, ttl=args.interval)
+    httpd = make_server(cache, host=args.host, port=args.port)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    print(
+        f"Serving board on http://{args.host}:{args.port}/board and streaming to Pixoo at "
+        f"{host} (Ctrl+C to stop)..."
+    )
+    try:
+        device = PixooDevice(host)
+        if args.brightness is not None:
+            device.set_brightness(args.brightness)
+        # Pixoo loop on the main thread (it owns SIGTERM); the server runs in the daemon thread.
+        run_pixoo(lambda: cache.get_board("departures"), device, fps=args.fps)
+    except KeyboardInterrupt:
+        print("\nStopped.")
+    except PixooError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+    return 0
+
+
 def _run_pixoo(
     args, settings: Settings, service: BoardService, direction: dict[str, object]
 ) -> int:
-    try:
-        board = service.get_departure_board(args.crs, with_details=True, **direction)
-    except (LdbwsError, ConfigError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-
     if args.preview:
+        try:
+            board = service.get_departure_board(args.crs, with_details=True, **direction)
+        except (LdbwsError, ConfigError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
         render_board_image(board).save(args.preview)
         print(f"Saved preview to {args.preview}")
         return 0
 
-    host = args.pixoo_host or settings.pixoo_host or discover_host()
+    host = _resolve_pixoo_host(args, settings)
     if not host:
         print(
             "Could not find a Pixoo on the network. Set PIXOO_HOST in .env or pass "
@@ -208,26 +268,18 @@ def _run_pixoo(
         if args.brightness is not None:
             device.set_brightness(args.brightness)
         if args.loop:
-            # Unattended/long-running: send the runner's progress and warnings to stdout
-            # so they're visible via `docker logs` (and the terminal when run directly).
-            logging.basicConfig(
-                level=logging.INFO,
-                format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-            )
-            # httpx logs every request ("HTTP Request: ...") at INFO; at ~5 fps that floods
-            # the log, so keep it (and httpcore) to warnings only.
-            logging.getLogger("httpx").setLevel(logging.WARNING)
-            logging.getLogger("httpcore").setLevel(logging.WARNING)
+            _configure_logging(quiet_httpx=True)  # per-frame httpx posts would flood at ~5 fps
             print(f"Streaming to Pixoo at {host} (Ctrl+C to stop)...")
-            run_pixoo(
-                service,
-                device,
-                crs=args.crs,
-                refresh=args.interval,
-                fps=args.fps,
-                board_kwargs=direction,
+            cache = BoardCache(
+                service, crs=args.crs, board_kwargs=direction, ttl=args.interval
             )
+            run_pixoo(lambda: cache.get_board("departures"), device, fps=args.fps)
         else:
+            try:
+                board = service.get_departure_board(args.crs, with_details=True, **direction)
+            except (LdbwsError, ConfigError) as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                return 1
             device.push_image(render_board_image(board))
             print(f"Pushed departure board to Pixoo at {host}.")
     except KeyboardInterrupt:
