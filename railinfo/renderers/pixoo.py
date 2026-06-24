@@ -2,10 +2,11 @@
 
 National-Rail dot-matrix look: amber text on black. Layout (64x64):
 
-* rows 0-2  — up to three departures: ``CRS  HH:MM`` (destination code + time, colour =
-  status). Codes keep names short so the font stays large and legible. A delayed service
-  shows the scheduled time followed by ``:MM`` of the revised minute (e.g. ``13:25 :28``),
-  matching the Heltec board.
+* rows 0-2  — up to three departures: ``CRS  P# HH:MM`` (destination code on the left;
+  platform + time right-justified flush to the edge on the same row, colour = status). Codes
+  keep names short so the font stays large and legible. A delayed service appends ``:MM`` of
+  the revised minute and drops the ``P`` prefix to make room (e.g. ``2 13:25 :28``), keeping
+  the code untruncated — matching the Heltec's notation.
 * row ~35   — the "calling at …" line for the first *non-cancelled* departure, scrolled
   horizontally. If that isn't the top row, a ``<`` after its code marks which train it is.
 * rows 47+  — a large centred clock.
@@ -121,7 +122,10 @@ def _draw_departure(
     code_font = _font(_CODE_FONT)
     time_font = _font(_TIME_FONT)
 
-    time_left = _draw_time(draw, _headline_time(service), SIZE - _MARGIN, y + 1, time_font, colour)
+    # Platform + time, like the Heltec's right-hand block; on the same row as the code and
+    # hard against the right edge. SIZE + 1 lands the digits' ink on the final column — the
+    # +1 absorbs the font's right side bearing so there's no gap.
+    time_left = _draw_time(draw, _right_text(service), SIZE + 1, y, time_font, colour)
 
     marker = "<"
     marker_w = int(draw.textlength(marker, font=code_font)) + 1 if mark else 0
@@ -165,6 +169,11 @@ def _choose_stops_index(services: list[Service]) -> int | None:
     )
 
 
+def _is_delayed(service: Service) -> bool:
+    """True when there's a revised time that differs from the scheduled one."""
+    return ":" in service.expected and service.expected != service.time
+
+
 def _headline_time(service: Service) -> str:
     """Scheduled time, plus " :MM" of the revised minute when delayed (e.g. "13:25 :28").
 
@@ -172,11 +181,24 @@ def _headline_time(service: Service) -> str:
     actual HH:MM revision; only the latter contains a colon, and only when it also differs
     from the scheduled time do we append the revised minute.
     """
-    sched = service.time
-    expected = service.expected
-    if ":" in expected and expected != sched:
-        return f"{sched} :{expected.split(':')[1]}"
-    return sched
+    if _is_delayed(service):
+        return f"{service.time} :{service.expected.split(':')[1]}"
+    return service.time
+
+
+def _right_text(service: Service) -> str:
+    """Right-hand block: platform then time, like the Heltec ("P2 13:25" / "P2 13:25 :28").
+
+    Dropped to just the time when the platform is unknown or the service is cancelled (a
+    cancelled train's platform is moot, and the red colour already flags it). On a delayed row
+    the leading "P" is dropped (bare platform number) to reclaim width — code + platform + the
+    ":MM" suffix won't all fit on 64px, and we'd rather keep the station code intact.
+    """
+    time = _headline_time(service)
+    if service.is_cancelled or not service.platform:
+        return time
+    prefix = service.platform if _is_delayed(service) else f"P{service.platform}"
+    return f"{prefix} {time}"
 
 
 def _abbreviate(name: str) -> str:

@@ -13,6 +13,7 @@ from railinfo.renderers.pixoo import (
     SIZE,
     _choose_stops_index,
     _headline_time,
+    _right_text,
     _status_colour,
     render_board_image,
 )
@@ -31,6 +32,26 @@ def test_headline_time_delayed_shows_scheduled_plus_revised_minute():
 def test_headline_time_revision_equal_to_scheduled_not_doubled():
     # A revision matching the scheduled minute shouldn't render "13:25 :25".
     assert _headline_time(make_service(std="13:25", etd="13:25")) == "13:25"
+
+
+# --- _right_text: platform prefix (like the Heltec), dropped when N/A ---------------
+
+def test_right_text_includes_platform():
+    assert _right_text(make_service(std="13:25", etd="On time", platform="2")) == "P2 13:25"
+
+
+def test_right_text_delayed_drops_p_keeps_platform_number():
+    # Delayed rows drop the "P" (bare number) to save width so the code isn't truncated.
+    assert _right_text(make_service(std="13:25", etd="13:28", platform="2")) == "2 13:25 :28"
+
+
+def test_right_text_no_platform_is_just_time():
+    assert _right_text(make_service(std="13:25", etd="On time", platform=None)) == "13:25"
+
+
+def test_right_text_cancelled_drops_platform():
+    svc = make_service(std="13:25", etd=None, platform="2", is_cancelled=True)
+    assert _right_text(svc) == "13:25"
 
 
 def test_headline_time_cancelled_shows_scheduled():
