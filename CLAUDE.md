@@ -127,7 +127,14 @@ polls it and the dev-box processes are retired. The 2026-06-23 UI sign-off still
   logging is quiet: one WARNING when the panel goes away, INFO when it returns.
 - **Tests**: signature updated; added `test_run_survives_pixoo_unreachable_at_startup` and
   `test_run_reconnects_via_connector_after_repeated_failures`. Suite **50 green** (`uv run
-  --offline pytest`). **Not yet redeployed to the NAS** — see Still pending.
+  --offline pytest`).
+- **Deployed to the NAS, tested, committed + pushed.** Verified the decoupling live (Pixoo off →
+  the Heltec/JSON server stays up; the Pixoo reconnects on its own when powered back on).
+- **Closed out the last two pending items.** Repo-side font cleanup was already complete (a prior
+  session did it but never cleared the note): `clients/heltec/lib/` holds only `dotmatrix9/19`
+  + `writer`/`depg0213`, no `dm*mono`/extra sizes anywhere, and `gen_fonts.ps1` is already
+  `9, 19`. Reviewed `setup_log.md` — the esptool/flash flow is current; added one line clarifying
+  the live server is the NAS (the dev-box IP in §5 was bring-up only).
 
 ### Done this session (2026-06-24)
 - **PRG button fix** (symptom: it only seemed to act when the board data changed). Cause: the
@@ -202,17 +209,7 @@ from a single LDBWS fetch. (Split mode `--serve` + `--pixoo --loop` still works 
 departures fetch; dev-box processes die when the box sleeps — the NAS doesn't.)
 
 ### Still pending
-- [ ] **Redeploy the Pixoo-independence fix to the NAS** (this session's code change is repo-only):
-      `pwsh scripts/deploy-to-nas.ps1 -NasHost <nas> -NasUser <admin> -Start -HostPort 8088`
-      (drop `-SkipBuild` so the image rebuilds). Verify: with the Pixoo OFF, `/board` still
-      returns a `ready` board and `docker logs railinfo` shows the loop retrying (one WARNING,
-      not a crash-restart loop); then power the Pixoo on and confirm it reconnects.
-- [ ] Commit `scripts/deploy-to-nas.ps1` (new last session, not yet committed).
-- [ ] **Repo-side** font cleanup (device is done): delete `clients/heltec/lib/`
-      `dotmatrix16/17/18/20..30` + `dm16mono/dm18mono/dm19mono`; set `gen_fonts.ps1 $sizes` to
-      `9, 19`. (Repo keeps the scratch scripts as source/diagnostics.)
-- [ ] Review `clients/heltec/setup_log.md` for staleness (the esptool/flash flow). The client
-      `README.md` is current (fonts/layout/IRQ + NAS server topology + "Starting up…").
+- _(none — all caught up.)_
 
 ### Decisions locked
 - Proportional fonts (NOT monospaced); 9 + 19 only; tabular/centred digits.

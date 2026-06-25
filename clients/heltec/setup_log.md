@@ -55,6 +55,9 @@ SSD1682 command sequence unchanged. Full refresh ~1.5s.
   (scheduled + revised minute); cancelled = `cancelled`, right-justified.
 - Deployed as `:main.py` (autostart). The device carries only the production files: `main.py`,
   `boot.py`, `config.py`, `boards.py`, and `lib/{depg0213,writer,dotmatrix9,dotmatrix19}`.
+- **Live server:** the client polls the `railinfo` container on the NAS (`192.168.1.10:8088`)
+  via `config.py SERVER_URL` — the dev-box `192.168.1.116:8000` in §5 was bring-up only. See the
+  client `README.md` for the current server topology and the "Starting up…" status screen.
 
 ## Notes / gotchas
 - The board enumerated on **COM3** (the ESP repo's older unit was COM4) — always confirm the
