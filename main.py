@@ -8,6 +8,7 @@ import json
 import logging
 import sys
 import threading
+from collections.abc import Callable
 
 from railinfo.config import ConfigError, Settings, load_settings
 from railinfo.ldbws.client import LdbwsError
@@ -187,6 +188,31 @@ def _resolve_pixoo_host(args, settings: Settings) -> str | None:
     return args.pixoo_host or settings.pixoo_host or discover_host()
 
 
+def _pixoo_connector(args, settings: Settings) -> Callable[[], PixooDevice]:
+    """Build the run loop's ``connect()``: (re)resolve the host, construct, set brightness.
+
+    Resolution and construction happen on every call so the Pixoo loop can keep retrying a panel
+    that's off or not yet discovered — raising :class:`PixooError` (no host / unreachable) tells
+    the loop to back off and retry rather than crash. Because this runs on each (re)connect, a
+    Pixoo that reboots gets its brightness re-applied. Crucially it lets the merged
+    ``--serve --pixoo`` process keep the JSON server up while the Pixoo is unreachable.
+    """
+
+    def connect() -> PixooDevice:
+        host = _resolve_pixoo_host(args, settings)
+        if not host:
+            raise PixooError(
+                "No Pixoo host yet (set PIXOO_HOST in .env, pass --pixoo-host, or it could "
+                "not be auto-discovered)."
+            )
+        device = PixooDevice(host)
+        if args.brightness is not None:
+            device.set_brightness(args.brightness)
+        return device
+
+    return connect
+
+
 def _run_server(args, service: BoardService, direction: dict[str, object]) -> int:
     # Long-running and unattended (on the NAS): send logs to stdout so they're visible via
     # `docker logs` and the terminal. httpx stays at INFO here (no per-frame flooding).
@@ -206,35 +232,29 @@ def _run_combined(
     args, settings: Settings, service: BoardService, direction: dict[str, object]
 ) -> int:
     """Serve the JSON API and stream to the Pixoo from one process and one shared board cache,
-    so the London-bound board is fetched from LDBWS once and used by both displays."""
-    _configure_logging(quiet_httpx=True)
-    host = _resolve_pixoo_host(args, settings)
-    if not host:
-        print(
-            "Could not find a Pixoo on the network. Set PIXOO_HOST in .env or pass "
-            "--pixoo-host.",
-            file=sys.stderr,
-        )
-        return 1
+    so the London-bound board is fetched from LDBWS once and used by both displays.
 
+    The JSON server is the Heltec's data source and must stay up independently of the Pixoo: the
+    server starts first and unconditionally, then the Pixoo runs as a best-effort consumer that
+    retries a powered-off/unreachable panel internally (see :func:`railinfo.pixoo.runner.run`) —
+    so an absent Pixoo can no longer take the server (and the Heltec) down with it.
+    """
+    _configure_logging(quiet_httpx=True)
     cache = BoardCache(service, crs=args.crs, board_kwargs=direction, ttl=args.interval)
     httpd = make_server(cache, host=args.host, port=args.port)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     print(
-        f"Serving board on http://{args.host}:{args.port}/board and streaming to Pixoo at "
-        f"{host} (Ctrl+C to stop)..."
+        f"Serving board on http://{args.host}:{args.port}/board (Ctrl+C to stop); streaming to "
+        f"the Pixoo when it's reachable — an unreachable Pixoo no longer stops the server."
     )
     try:
-        device = PixooDevice(host)
-        if args.brightness is not None:
-            device.set_brightness(args.brightness)
         # Pixoo loop on the main thread (it owns SIGTERM); the server runs in the daemon thread.
-        run_pixoo(lambda: cache.get_board("departures"), device, fps=args.fps)
+        # The loop owns the device lifecycle, so PixooErrors never reach here.
+        run_pixoo(
+            lambda: cache.get_board("departures"), _pixoo_connector(args, settings), fps=args.fps
+        )
     except KeyboardInterrupt:
         print("\nStopped.")
-    except PixooError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
     finally:
         httpd.shutdown()
         httpd.server_close()
@@ -254,6 +274,24 @@ def _run_pixoo(
         print(f"Saved preview to {args.preview}")
         return 0
 
+    if args.loop:
+        # Unattended: the run loop owns the device lifecycle and retries an unreachable Pixoo,
+        # so connect lazily (no host gate that would exit before the loop even starts).
+        _configure_logging(quiet_httpx=True)  # per-frame httpx posts would flood at ~5 fps
+        print("Streaming to Pixoo when reachable (Ctrl+C to stop)...")
+        cache = BoardCache(service, crs=args.crs, board_kwargs=direction, ttl=args.interval)
+        try:
+            run_pixoo(
+                lambda: cache.get_board("departures"),
+                _pixoo_connector(args, settings),
+                fps=args.fps,
+            )
+        except KeyboardInterrupt:
+            print("\nStopped.")
+        return 0
+
+    # One-shot push: resolve and connect eagerly, reporting and exiting on error (the right
+    # behaviour for a single CLI command, unlike the retrying loop above).
     host = _resolve_pixoo_host(args, settings)
     if not host:
         print(
@@ -267,21 +305,13 @@ def _run_pixoo(
         device = PixooDevice(host)
         if args.brightness is not None:
             device.set_brightness(args.brightness)
-        if args.loop:
-            _configure_logging(quiet_httpx=True)  # per-frame httpx posts would flood at ~5 fps
-            print(f"Streaming to Pixoo at {host} (Ctrl+C to stop)...")
-            cache = BoardCache(
-                service, crs=args.crs, board_kwargs=direction, ttl=args.interval
-            )
-            run_pixoo(lambda: cache.get_board("departures"), device, fps=args.fps)
-        else:
-            try:
-                board = service.get_departure_board(args.crs, with_details=True, **direction)
-            except (LdbwsError, ConfigError) as exc:
-                print(f"Error: {exc}", file=sys.stderr)
-                return 1
-            device.push_image(render_board_image(board))
-            print(f"Pushed departure board to Pixoo at {host}.")
+        try:
+            board = service.get_departure_board(args.crs, with_details=True, **direction)
+        except (LdbwsError, ConfigError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        device.push_image(render_board_image(board))
+        print(f"Pushed departure board to Pixoo at {host}.")
     except KeyboardInterrupt:
         print("\nStopped.")
     except PixooError as exc:

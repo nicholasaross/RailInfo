@@ -17,9 +17,14 @@ Data acquisition is decoupled from presentation behind `railinfo/domain` + `rail
 
 - `railinfo/service.py` — `BoardService`: fetch + map LDBWS → domain. The seam everything wraps.
 - `railinfo/renderers/pixoo.py` — 64×64 Pillow render (Phase 2), Dot Matrix TTF, thresholded.
-- `railinfo/pixoo/` — Divoom device + hardened push `runner.py`. **`run(get_board, device,
+- `railinfo/pixoo/` — Divoom device + hardened push `runner.py`. **`run(get_board, connect,
   fps)`** pulls the current board from a provider (the shared `BoardCache`) each frame and
-  never fetches LDBWS itself; shows a "starting" placeholder until the first board lands.
+  never fetches LDBWS itself; shows a "starting" placeholder until the first board lands. **The
+  loop owns the whole device lifecycle**: it calls `connect()` (a factory; see
+  `main._pixoo_connector`) *lazily* and reconnects via it after a run of failed pushes, so a
+  Pixoo that's off at startup or vanishes mid-stream only makes it back off and retry — `run`
+  never raises a `PixooError`. That keeps the JSON server (sibling thread) alive when the Pixoo
+  is down.
 - `railinfo/server.py` — **Phase 4 JSON API** (stdlib `http.server`). `python main.py --serve`.
   Views via `?view=`: `departures` (default, London-bound, with calling points),
   `all` (every direction), `arrivals` (by origin). **`BoardCache`** holds the domain
@@ -96,11 +101,33 @@ writes a prebuilt-image compose + LF-normalised `.env` and runs compose up. Rede
 
 ---
 
-## RESUME HERE — 2026-06-24
+## RESUME HERE — 2026-06-25
 
 **All four phases done and live.** The merged server+Pixoo process now runs as the `railinfo`
 container on the **Synology NAS** (`192.168.1.10:8088`; see "NAS deployment" above); the Heltec
 polls it and the dev-box processes are retired. The 2026-06-23 UI sign-off still holds.
+
+### Done this session (2026-06-25) — decouple the Pixoo from the JSON server
+- **Bug**: with the Pixoo powered off overnight (soak-testing the Heltec), the Heltec reported
+  "Server error". Cause: in the merged process the Pixoo client was constructed *eagerly* on the
+  main thread before/around the run loop (`PixooDevice.__init__` → `Draw/ResetHttpGifId`
+  handshake). With the panel off that raised `PixooError` (`[Errno 113] No route to host`),
+  `_run_combined` caught it, `return 1`, the `finally` tore the HTTP server down, the process
+  exited — and `restart: unless-stopped` looped it. So the server (the Heltec's data source)
+  flapped because the *Pixoo* was unreachable. The clients were not independent.
+- **Fix — the run loop now owns the device lifecycle.** `runner.run(get_board, connect, fps)`
+  (was `…, device, …`): it calls a **`connect` factory lazily**, treats a failed connect exactly
+  like a failed push (back off, retry, never raise out of `run`), and reconnects via the same
+  factory after `_RECONNECT_AFTER` push failures. `main._pixoo_connector(args, settings)` builds
+  `connect` — it (re)resolves the host + constructs + sets brightness each call, so a Pixoo
+  reboot re-applies brightness. `_run_combined` now **starts the HTTP server first and
+  unconditionally** (no host gate, no eager device, no `except PixooError`); an absent Pixoo can
+  no longer stop it. `--pixoo --loop` (standalone) routes through the connector too; the one-shot
+  `--pixoo` push stays eager (report-and-exit is right for a single CLI command). Connect-outage
+  logging is quiet: one WARNING when the panel goes away, INFO when it returns.
+- **Tests**: signature updated; added `test_run_survives_pixoo_unreachable_at_startup` and
+  `test_run_reconnects_via_connector_after_repeated_failures`. Suite **50 green** (`uv run
+  --offline pytest`). **Not yet redeployed to the NAS** — see Still pending.
 
 ### Done this session (2026-06-24)
 - **PRG button fix** (symptom: it only seemed to act when the board data changed). Cause: the
@@ -175,7 +202,12 @@ from a single LDBWS fetch. (Split mode `--serve` + `--pixoo --loop` still works 
 departures fetch; dev-box processes die when the box sleeps — the NAS doesn't.)
 
 ### Still pending
-- [ ] Commit `scripts/deploy-to-nas.ps1` (new this session, not yet committed).
+- [ ] **Redeploy the Pixoo-independence fix to the NAS** (this session's code change is repo-only):
+      `pwsh scripts/deploy-to-nas.ps1 -NasHost <nas> -NasUser <admin> -Start -HostPort 8088`
+      (drop `-SkipBuild` so the image rebuilds). Verify: with the Pixoo OFF, `/board` still
+      returns a `ready` board and `docker logs railinfo` shows the loop retrying (one WARNING,
+      not a crash-restart loop); then power the Pixoo on and confirm it reconnects.
+- [ ] Commit `scripts/deploy-to-nas.ps1` (new last session, not yet committed).
 - [ ] **Repo-side** font cleanup (device is done): delete `clients/heltec/lib/`
       `dotmatrix16/17/18/20..30` + `dm16mono/dm18mono/dm19mono`; set `gen_fonts.ps1 $sizes` to
       `9, 19`. (Repo keeps the scratch scripts as source/diagnostics.)
@@ -202,3 +234,8 @@ departures fetch; dev-box processes die when the box sleeps — the NAS doesn't.
   **Bridge networking + `-HostPort 8088`** publish (NOT host mode; `:8000`/`:8080` are taken by
   the user's bindicator/connect3). Deploy via `scripts/deploy-to-nas.ps1`. Never run two Pixoo
   pushers at once (PicID stall) — see "NAS deployment".
+- **The two clients are independent.** A down/unreachable Pixoo must NEVER stop the JSON server
+  (the Heltec's data source). The merged process starts the server first + unconditionally; the
+  Pixoo run loop connects lazily and retries forever via a `connect` factory, never raising out
+  of `runner.run`. (Likewise the server is lazy on connect, so the Heltec doesn't depend on the
+  Pixoo for the first fetch.) Don't reintroduce eager Pixoo construction on the main thread.

@@ -118,6 +118,10 @@ uv run python -u main.py --serve --pixoo --loop --port 8000
 still run either side alone — `--serve` (API only) or `--pixoo --loop` (Pixoo only) — but
 together in one process is what avoids the duplicate upstream fetch.
 
+The two displays are independent: the JSON API stays up even if the Pixoo is powered off or off
+the network (the streamer just retries in the background until the panel reappears), so the
+Heltec keeps working on its own.
+
 The Heltec can't resolve hostnames, so set the server's LAN IP (not a name) in
 `clients/heltec/config.py`. See the [client README](clients/heltec/README.md) for flashing,
 fonts, the PRG-button view cycling, and configuration.
