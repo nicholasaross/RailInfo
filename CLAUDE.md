@@ -177,8 +177,9 @@ section above. Server unchanged; the Heltec is untouched.
   BOOT/tap cycle views and no auto-cycling.
 - **Scrolling calling-at footer added (confirmed live).** Long "Calling: …" lines scroll ~50 px/s;
   short ones stay static. See the "CYD client" section.
-- **Fully working end-to-end on the live device.** Remaining: purely optional polish (scroll speed
-  etc.) and the git commit — `clients/cyd/` + doc updates are still unstaged.
+- **Fully working end-to-end on the live device, committed + pushed** (2026-07-01). `clients/cyd/`
+  + the `.gitignore`/`README.md`/`CLAUDE.md` edits are in git; `config.py` stays gitignored. Any
+  further work is optional polish (e.g. scroll speed via `FOOT_SCROLL_STEP`/`FOOT_SCROLL_MS`).
 
 ### Prior — 2026-06-25 — decouple the Pixoo from the JSON server
 **All four phases done and live.** The merged server+Pixoo process runs as the `railinfo`

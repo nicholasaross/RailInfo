@@ -59,6 +59,7 @@ BIG_SCALE = 2
 FOOT_SCROLL_STEP = 8
 FOOT_SCROLL_MS = 60
 INPUT_POLL_MS = 15
+FOOT_SCROLL_DELAY_MS = 1500  # hold the start of the calling list still this long before scrolling
 
 # --- Colours (RGB565) - amber/orange/red, tuned for THIS panel ---
 # The CYD's TFT has a very luminous green, so the Pixoo's yellowish amber (255,176,0) reads
@@ -185,6 +186,7 @@ class Board:
         self._foot_key = None    # last footer text (rebuild the wide strip only when it changes)
         self._scrolling = False  # is the footer currently wider than the screen (scroll it)?
         self._scroll = 0         # current horizontal scroll offset (px)
+        self._scroll_start = 0   # ticks_ms when the current footer was built (for the start pause)
         self._foot_wide = None   # Strip holding the full footer text (for scrolling)
         self._foot_total = 0     # width of _foot_wide incl. wrap gap
 
@@ -292,6 +294,7 @@ class Board:
         self._foot_total = total + gap
         self._scrolling = True
         self._scroll = 0
+        self._scroll_start = time.ticks_ms()  # start the pause; tick_scroll holds until it elapses
         self.blit_footer(self._scroll)
 
     def blit_footer(self, scroll):
@@ -307,8 +310,9 @@ class Board:
         self.blit_strip(self.small, 0, self.FOOT_Y, AMBER)
 
     def tick_scroll(self):
-        """Advance + redraw the footer one scroll step (no-op unless the footer is scrolling)."""
-        if self._scrolling:
+        """Advance + redraw the footer one scroll step, after an initial hold so the start of the
+        list is readable. No-op unless the footer is scrolling and the start pause has elapsed."""
+        if self._scrolling and time.ticks_diff(time.ticks_ms(), self._scroll_start) >= FOOT_SCROLL_DELAY_MS:
             self._scroll += FOOT_SCROLL_STEP
             self.blit_footer(self._scroll)
 
