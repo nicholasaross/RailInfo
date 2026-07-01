@@ -58,11 +58,50 @@ instead of a board; the real board lands on a later poll.
   time: on-time = scheduled; delayed = `HH:MM :MM` (sched + revised minute); cancelled =
   `cancelled` right-justified. Header = station + clock; separator line under it.
 
+## CYD client (`clients/cyd/`)
+
+**Phase 4 hybrid client** for the **CYD / ESP32-2432S028** (original ESP32, **no PSRAM**; 2.8"
+320×240 colour TFT + XPT2046 touch). **Display is an ILI9342, not ILI9341** — see [[cyd-h685-ili9342]]
+and `clients/cyd/setup_log.md`. Same pull/multi-view model as the Heltec
+(reuses `writer.py`, `font_to_py`/`tabular_digits`, `http_get_json`, the button-IRQ latch, the
+`MODES` cycle, `_fit_px`/`_disp_time`), rendered in the **Pixoo's colour dot-matrix** look with
+**per-row status colours** (amber on-time / orange delayed / red cancelled — `_status_colour`
+mirrors `renderers/pixoo.py`). All three views are **landscape** (no portrait transpose).
+
+- **Strip-blit renderer (no full framebuffer).** No PSRAM → a 320×240 RGB565 buffer (150 KB)
+  won't fit. Each region (header / each row / footer) is drawn by `Writer` into a 1-bpp `Strip`
+  (`framebuf.FrameBuffer`, MONO_HLSB), then `Board.blit_strip` expands lit pixels → the region's
+  status colour (unlit → black) into a **reused** RGB565 scratch buffer and pushes it via the
+  driver's `block()`. **Per-region change detection** (`Board._emit` caches mono bytes + colour)
+  re-blits only changed regions, so a static board doesn't flicker; a full repaint (`clear()` +
+  chrome + all regions) happens only on entry / view change (`force=True`).
+- Fonts: **one clean size, dotmatrix19** (like the Heltec). On the sharp TFT the dot-matrix only
+  rasterises crisply at ≤~19; bigger point sizes look off-grid. So the big departure rows are 19
+  **integer-scaled ×2** at blit time (`BIG_SCALE`; `blit_strip(scale=…)` replicates each dot into
+  a square block) — small text is 1×. `gen_fonts.ps1` uses `$sizes = @(19)`.
+- Driver `lib/ili9341.py` — minimal, purpose-built (init + `block()`/`fill_rectangle()`/`clear()`
+  only). **This unit is an ILI9342** (native 320×240 landscape): `ROTATION = 0x40` (MADCTL MX,
+  **no MV** — MV half-widths it; no BGR — it's RGB). On **`SPI(1)`/HSPI @ 20 MHz** (SPI2 / 40 MHz
+  failed). CS framed once per transaction; `block()` wants **big-endian** RGB565 (row-major with
+  no MV). **Palette tuned for this green-heavy panel as rendered TEXT:** amber `(255,150,0)` /
+  orange `(255,60,0)` / red `(255,0,0)` (the Pixoo's `(255,176,0)` reads green here).
+- **Scrolling calling-at footer** (departures view): when wider than the screen the "Calling: …"
+  line is drawn into a wide off-screen strip and slid ~50 px/s, animated by `board.tick_scroll`
+  passed as `Inputs.wait(on_tick=…)` so it moves during the ~5s poll wait; short lists stay static.
+- **Hybrid input — POLLED (`Inputs` class), not IRQ.** BOOT button by **GPIO0 level** + screen tap
+  by **reading the XPT2046 pressure** (Z1) over SoftSPI (25/32/39, CS 33), both polled in the wait
+  loop. **The touch IRQ line GPIO36 is unusable** (fires ~9 phantom IRQs/s; a real tap doesn't
+  pull it low) — an IRQ design auto-cycled the view each poll and ate BOOT presses. Don't go back
+  to IRQs on GPIO36.
+
 ## Gotchas
 
 - **The ESP repo `D:\Projects\ESP` is READ-ONLY** — copy out only, never modify. `depg0213.py`,
   WiFi/retry logic, board config, and `micropython_s3.bin` were copied from there.
 - Heltec is on **COM3** (box-fresh ESP32-S3, MicroPython 1.28 flashed at `0x0`). Confirm S3.
+- **CYD is on COM4** (CH340 USB-serial → **original ESP32, not S3**). MicroPython = generic
+  `ESP32_GENERIC`, flashed at offset **`0x1000`** (NOT `0x0` — that's the S3). Confirm `flash-id`
+  reports plain ESP32. `config.py` gitignored like the Heltec's.
 - `mpremote` installed via `uv tool install mpremote`; `esptool` lives in `D:\Projects\ESP\.venv`.
 - **Network ops need the sandbox disabled** (uv fetching freetype-py; the server's LDBWS calls).
   Serial (mpremote) and loopback curl do not.
@@ -101,9 +140,48 @@ writes a prebuilt-image compose + LF-normalised `.env` and runs compose up. Rede
 
 ---
 
-## RESUME HERE — 2026-06-25
+## RESUME HERE — 2026-07-01
 
-**All four phases done and live.** The merged server+Pixoo process now runs as the `railinfo`
+**All four phases done and live** (NAS container on `192.168.1.10:8088`; Heltec polls it). This
+session adds a **third client: the CYD colour-TFT client** (`clients/cyd/`) — see the "CYD client"
+section above. Server unchanged; the Heltec is untouched.
+
+### Done this session (2026-07-01) — new CYD (ESP32-2432S028) hybrid client
+- **Goal**: a hybrid of the two existing clients — the Heltec's pull/multi-view behaviour in the
+  Pixoo's colour dot-matrix look, on the CYD's 2.8" 320×240 ILI9341 colour TFT + XPT2046 touch.
+  Toolchain **MicroPython** (max reuse of the Heltec pipeline). Device on **COM4** (CH340 →
+  original ESP32, no PSRAM). No server changes — the three views already existed.
+- **Built `clients/cyd/`** mirroring `clients/heltec/`: `railinfo_client.py` (main loop +
+  `Board` strip-blit renderer), `boards.py` (SPI2 + ILI9341 + backlight), `lib/ili9341.py`
+  (minimal purpose-built driver), copied `lib/writer.py`, generated `lib/dotmatrix17.py` +
+  `dotmatrix27.py`, `tools/gen_fonts.ps1` (`$sizes = 17, 27`), `config.py.example`, `deploy.ps1`
+  (COM4), `_smoketest.py`, `README.md`, `setup_log.md`. `.gitignore` now ignores
+  `clients/cyd/config.py`. Root README + this file updated.
+- **Rendering** (the crux): no PSRAM → no full RGB565 framebuffer; render each region into a
+  1-bpp `Strip` via `Writer`, colourise (status colour) → RGB565 → `block()` (big rows ×2
+  integer-scaled), with per-region change detection to avoid flicker. **Status by colour**
+  (amber/orange/red). See "CYD client".
+- **Hybrid input**: BOOT (GPIO0) + touch IRQ (GPIO36) both drive the same debounced press latch.
+- **FLASHED, VERIFIED, and LIVE-DEPLOYED on-device 2026-07-01.** Long bring-up debug (see
+  `clients/cyd/setup_log.md`): the panel (marked **H685**) is an **ILI9342 not ILI9341** → on
+  `SPI(1)`/HSPI @ **20 MHz**, ROTATION **0x40 (no MV)**, RGB. Palette re-tuned for the green-heavy
+  TFT. Font reworked to one clean **dotmatrix19** (big rows ×2 scaled). Departures + all/arrivals
+  list + colours all confirmed correct on-panel. See [[cyd-h685-ili9342]].
+- **Live and autostarting.** Real WiFi creds in `clients/cyd/config.py` (gitignored); smoketest
+  confirmed WiFi (device DHCP `192.168.1.222`) + a live `ready` board fetched from the NAS
+  (`192.168.1.10:8088`, station Earlswood, 4 services). Deployed as `:main.py` via
+  `deploy.ps1 -Port COM4 -Autostart`; device reset and running the full poll/cycle loop.
+- **Input reworked IRQ → polling (confirmed live).** The IRQ design auto-cycled every poll and
+  ate BOOT presses (GPIO36 touch IRQ fires ~9 phantom edges/s; a real tap doesn't pull it low).
+  Now polled: BOOT by GPIO0 level + tap by reading the XPT2046 pressure (SoftSPI). User confirmed
+  BOOT/tap cycle views and no auto-cycling.
+- **Scrolling calling-at footer added (confirmed live).** Long "Calling: …" lines scroll ~50 px/s;
+  short ones stay static. See the "CYD client" section.
+- **Fully working end-to-end on the live device.** Remaining: purely optional polish (scroll speed
+  etc.) and the git commit — `clients/cyd/` + doc updates are still unstaged.
+
+### Prior — 2026-06-25 — decouple the Pixoo from the JSON server
+**All four phases done and live.** The merged server+Pixoo process runs as the `railinfo`
 container on the **Synology NAS** (`192.168.1.10:8088`; see "NAS deployment" above); the Heltec
 polls it and the dev-box processes are retired. The 2026-06-23 UI sign-off still holds.
 

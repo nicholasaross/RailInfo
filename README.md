@@ -4,8 +4,9 @@ A software-only live National Rail departure board, inspired by
 [chrisys/train-departure-display](https://github.com/chrisys/train-departure-display)
 but with no Raspberry Pi hardware. It reads real-time data from the National Rail
 **LDBWS** REST API (via the Rail Data Marketplace) and renders it to the terminal, a
-[Divoom Pixoo 64](https://divoom.com/products/pixoo-64), or a battery e-ink board (a
-Heltec Wireless Paper) fed by a small JSON server.
+[Divoom Pixoo 64](https://divoom.com/products/pixoo-64), a battery e-ink board (a
+Heltec Wireless Paper), or a colour TFT (the CYD / ESP32-2432S028) — the last two fed by a
+small JSON server.
 
 ## Phase 1 — LDBWS departure board (done)
 
@@ -87,11 +88,18 @@ automatically via Divoom's LAN discovery; override with `--pixoo-host` or `PIXOO
 scroll is deliberately paced. `--loop` re-fetches data every `--interval` seconds (default
 30) and keeps the last good board if a refresh fails.
 
-## Phase 4 — JSON server + Heltec e-ink client (done)
+## Phase 4 — JSON server + pull clients (done)
 
-A small stdlib HTTP server (`--serve`) exposes the board as JSON at `/board`, and a
-[Heltec Wireless Paper](clients/heltec/README.md) (ESP32-S3 + 2.13" e-ink, MicroPython)
-polls it over Wi-Fi and renders a live board. Three views, chosen with `?view=`:
+A small stdlib HTTP server (`--serve`) exposes the board as JSON at `/board`, and one or more
+LAN display clients poll it over Wi-Fi and render a live board on-device:
+
+- [Heltec Wireless Paper](clients/heltec/README.md) — ESP32-S3 + 2.13" monochrome e-ink (MicroPython).
+- [CYD colour client](clients/cyd/README.md) — ESP32-2432S028 + 2.8" 320×240 ILI9341 colour TFT
+  (MicroPython). A **hybrid**: the Heltec's pull/multi-view behaviour rendered in the Pixoo's
+  colour dot-matrix look (amber/orange/red status colours), with view cycling by the BOOT button
+  **or** a screen tap.
+
+Three views, chosen with `?view=`:
 
 - `departures` (default) — London-bound board with the "calling at…" line (landscape).
 - `all` — every departure, no direction filter (portrait).
@@ -122,9 +130,9 @@ The two displays are independent: the JSON API stays up even if the Pixoo is pow
 the network (the streamer just retries in the background until the panel reappears), so the
 Heltec keeps working on its own.
 
-The Heltec can't resolve hostnames, so set the server's LAN IP (not a name) in
-`clients/heltec/config.py`. See the [client README](clients/heltec/README.md) for flashing,
-fonts, the PRG-button view cycling, and configuration.
+The clients can't resolve hostnames, so set the server's LAN IP (not a name) in each client's
+`config.py`. See the [Heltec README](clients/heltec/README.md) and
+[CYD README](clients/cyd/README.md) for flashing, fonts, view cycling, and configuration.
 
 ## Development
 
@@ -152,6 +160,7 @@ renderer — terminal, Pixoo, and the e-ink client's JSON server — shares one 
 - `railinfo/pixoo/` — `device.py` (Divoom HTTP API + LAN discovery) and `runner.py` (loop).
 - `railinfo/server.py` — Phase 4 JSON API (`--serve`); projects the domain model to `/board`.
 - `clients/heltec/` — MicroPython e-ink client (polls the server; see its own README).
+- `clients/cyd/` — MicroPython colour-TFT client (ESP32-2432S028; strip-blit dot-matrix renderer).
 - `tests/` — pytest suite; `scripts/` — `preview_board.py` (offline PNG preview) and
   `deploy-to-nas.ps1` (build + ship the image to the NAS over SSH).
 
