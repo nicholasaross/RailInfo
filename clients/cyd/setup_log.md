@@ -109,6 +109,20 @@ here. Verified values: on-time amber `(255,150,0)`, delayed orange `(255,60,0)`,
 - **Live server:** polls the `railinfo` container on the NAS (`192.168.1.10:8088`) via
   `config.py SERVER_URL`. No server changes were needed — the three views already existed.
 
+## 7. Stability (freeze-after-a-while fix)
+Symptom: after running a while the panel froze (scroll + input dead). No fast heap leak, but two
+real causes were hardened (all in `railinfo_client.py`):
+- **`run()`'s whole inner-loop body is wrapped in `try/except`.** Previously only the *fetch* was
+  guarded; a transient error in render/scroll (or a network error on an unguarded path) escaped
+  `run()`, ending `main.py` → frozen screen. Now such errors are logged (`sys.print_exception`),
+  GC'd, and the loop continues.
+- **The scrolling footer reuses ONE wide `Strip`/`Writer`** (`Board.foot_wide`, `FOOT_MAX_W`).
+  The old code allocated a fresh `Strip`+`Writer` per footer rebuild, which leaked `Writer.state`
+  (grows forever) and fragmented the heap. With the reuse, `len(Writer.state)` stays constant and
+  free heap is flat (~67–73 KB) over a 3.5-min cycle-stress test.
+- Smaller: touch `_z1()` uses `readinto` (no per-poll alloc), the scroll offset is kept bounded
+  (no bignum), and `gc.collect()` runs each poll.
+
 ## Notes / gotchas
 - Enumerated on **COM4** (CH340). Always confirm `flash-id` reports plain ESP32, and flash at
   **`0x1000`** (not `0x0`).

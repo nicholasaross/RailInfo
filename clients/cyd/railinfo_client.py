@@ -21,6 +21,8 @@
 # Deploy: lib modules under /lib, plus boards.py + config.py + this file (as main.py to
 # autostart). See README.md.
 
+import gc
+import sys
 import network
 import time
 import json
@@ -60,6 +62,7 @@ FOOT_SCROLL_STEP = 8
 FOOT_SCROLL_MS = 60
 INPUT_POLL_MS = 15
 FOOT_SCROLL_DELAY_MS = 1500  # hold the start of the calling list still this long before scrolling
+FOOT_MAX_W = 2600            # reusable footer strip width (px); longer calling lists are clipped
 
 # --- Colours (RGB565) - amber/orange/red, tuned for THIS panel ---
 # The CYD's TFT has a very luminous green, so the Pixoo's yellowish amber (255,176,0) reads
@@ -178,8 +181,10 @@ class Board:
 
         self.small = Strip(w, sh)             # header / footer / list rows (dotmatrix19, scale 1)
         self.big = Strip(w // BIG_SCALE, sh)  # departure-row SOURCE (scale 2 -> full width)
+        self.foot_wide = Strip(FOOT_MAX_W, sh)  # reusable wide strip for the scrolling footer
         self.wri_small = self._mk(self.small, SMALL_FONT)
         self.wri_big = self._mk(self.big, SMALL_FONT)
+        self.wri_foot = self._mk(self.foot_wide, SMALL_FONT)
         self._rgb = bytearray(w * self.BIG_DISP * 2)  # reused RGB565 scratch (largest output)
         self._cache = {}     # slot -> (mono bytes, colour) for change detection
         self._status = None  # last status-screen lines (None while a board is shown)
@@ -187,8 +192,7 @@ class Board:
         self._scrolling = False  # is the footer currently wider than the screen (scroll it)?
         self._scroll = 0         # current horizontal scroll offset (px)
         self._scroll_start = 0   # ticks_ms when the current footer was built (for the start pause)
-        self._foot_wide = None   # Strip holding the full footer text (for scrolling)
-        self._foot_total = 0     # width of _foot_wide incl. wrap gap
+        self._foot_total = 0     # width of the footer text in foot_wide incl. wrap gap (0 = none)
 
     @staticmethod
     def _mk(strip, font):
@@ -278,19 +282,20 @@ class Board:
         total = self.wri_small.stringlen(text) if text else 0
         if total <= self.d.width:                       # fits — draw once, no scroll
             self._scrolling = False
-            self._foot_wide = None
             self.small.fill(0)
             if text:
                 _draw(self.wri_small, 0, 0, text)
             self._emit("foot", self.small, self.FOOT_Y, AMBER, True)
             return
         gap = 30                                         # blank run before the text wraps
-        wide = Strip(total + gap, self.small.height)
-        wri = self._mk(wide, SMALL_FONT)
-        wide.fill(0)
-        Writer.set_textpos(wide, 0, 0)
-        wri.printstring(text, False)
-        self._foot_wide = wide
+        # Render into the REUSED wide strip (no per-rebuild Strip/Writer allocation — that leaked
+        # Writer.state and fragmented the heap). Clip over-long lists to the strip width.
+        if total > FOOT_MAX_W - gap:
+            text = _fit_px(self.wri_foot, text, FOOT_MAX_W - gap)
+            total = self.wri_foot.stringlen(text)
+        self.foot_wide.fill(0)
+        Writer.set_textpos(self.foot_wide, 0, 0)
+        self.wri_foot.printstring(text, False)
         self._foot_total = total + gap
         self._scrolling = True
         self._scroll = 0
@@ -305,8 +310,8 @@ class Board:
         """
         off = scroll % self._foot_total
         self.small.fill(0)
-        self.small.blit(self._foot_wide, -off, 0)
-        self.small.blit(self._foot_wide, self._foot_total - off, 0)
+        self.small.blit(self.foot_wide, -off, 0)
+        self.small.blit(self.foot_wide, self._foot_total - off, 0)
         self.blit_strip(self.small, 0, self.FOOT_Y, AMBER)
 
     def tick_scroll(self):
@@ -314,6 +319,8 @@ class Board:
         list is readable. No-op unless the footer is scrolling and the start pause has elapsed."""
         if self._scrolling and time.ticks_diff(time.ticks_ms(), self._scroll_start) >= FOOT_SCROLL_DELAY_MS:
             self._scroll += FOOT_SCROLL_STEP
+            if self._scroll >= self._foot_total:        # keep it bounded (no unbounded bignum)
+                self._scroll -= self._foot_total
             self.blit_footer(self._scroll)
 
     # --- rendering ---
@@ -494,14 +501,16 @@ class Inputs:
         self._pb = 1          # previous button level (1 = released)
         self._touch = False   # previous touch state
         self._last_ms = 0
+        self._cmd = b"\xb0"                 # XPT2046 Z1 command (constant, reused)
+        self._rbuf = bytearray(2)           # reused read buffer (polled every ~15ms; no per-poll alloc)
 
     def _z1(self):
         """XPT2046 Z1 pressure sample (0..4095); ~0 when untouched."""
         self.tcs(0)
-        self.tspi.write(b"\xb0")       # Z1 measurement command
-        r = self.tspi.read(2)
+        self.tspi.write(self._cmd)
+        self.tspi.readinto(self._rbuf)
         self.tcs(1)
-        return ((r[0] << 8) | r[1]) >> 3
+        return ((self._rbuf[0] << 8) | self._rbuf[1]) >> 3
 
     def pressed(self):
         """True on a fresh BOOT press or a fresh screen tap (edge-triggered, debounced)."""
@@ -561,40 +570,53 @@ def run():
         fails = 0
         pending = False  # a press/tap seen during the last wait, handled at the loop top
         while True:
-            if pending or inputs.pressed():  # BOOT or tap -> next view now
-                mode = (mode + 1) % len(MODES)
-                force = True
-                pending = False
-                print("mode ->", MODES[mode][0])
-
-            view, is_list, title = MODES[mode]
+            # The whole body is guarded: a transient render/scroll/socket error must NEVER escape
+            # run() (that would leave the panel frozen). On error we log it, free memory, and keep
+            # looping. `break`/`continue` below act on this while (they're not exceptions).
             try:
-                data = http_get_json(SERVER_URL + "?view=" + view)
-                fails = 0
-            except Exception as exc:
-                fails += 1
-                print("fetch failed:", exc)
+                if pending or inputs.pressed():  # BOOT or tap -> next view now
+                    mode = (mode + 1) % len(MODES)
+                    force = True
+                    pending = False
+                    print("mode ->", MODES[mode][0])
+
+                view, is_list, title = MODES[mode]
+                try:
+                    data = http_get_json(SERVER_URL + "?view=" + view)
+                    fails = 0
+                except Exception as exc:
+                    fails += 1
+                    print("fetch failed:", exc)
+                    if not wlan.isconnected():
+                        break
+                    if fails >= FETCH_FAIL_LIMIT:
+                        board.show_status(["RailInfo", "Server error"])
+                        force = True
+                    pending = inputs.wait(POLL_INTERVAL_S, board.tick_scroll)
+                    continue
+
+                if data.get("status") == "starting":
+                    board.show_status(["RailInfo", "Starting up..."])
+                    force = True
+                elif is_list:
+                    board.render_list(title, data, force)
+                    force = False
+                else:
+                    board.render_departures(data, force)
+                    force = False
+
+                gc.collect()  # keep the heap defragmented each poll (no PSRAM)
+                pending = inputs.wait(POLL_INTERVAL_S, board.tick_scroll)
                 if not wlan.isconnected():
                     break
-                if fails >= FETCH_FAIL_LIMIT:
-                    board.show_status(["RailInfo", "Server error"])
-                    force = True
-                pending = inputs.wait(POLL_INTERVAL_S, board.tick_scroll)
-                continue
-
-            if data.get("status") == "starting":
-                board.show_status(["RailInfo", "Starting up..."])
-                force = True
-            elif is_list:
-                board.render_list(title, data, force)
-                force = False
-            else:
-                board.render_departures(data, force)
-                force = False
-
-            pending = inputs.wait(POLL_INTERVAL_S, board.tick_scroll)
-            if not wlan.isconnected():
-                break
+            except Exception as exc:
+                print("loop error:", exc)
+                sys.print_exception(exc)
+                gc.collect()
+                force = True  # repaint fully next time
+                if not wlan.isconnected():
+                    break
+                pending = inputs.wait(2, board.tick_scroll)  # stay responsive, brief pause
 
 
 if __name__ == "__main__":
