@@ -5,8 +5,8 @@ A software-only live National Rail departure board, inspired by
 but with no Raspberry Pi hardware. It reads real-time data from the National Rail
 **LDBWS** REST API (via the Rail Data Marketplace) and renders it to the terminal, a
 [Divoom Pixoo 64](https://divoom.com/products/pixoo-64), a battery e-ink board (a
-Heltec Wireless Paper), or a colour TFT (the CYD / ESP32-2432S028) — the last two fed by a
-small JSON server.
+Heltec Wireless Paper), a colour TFT (the CYD / ESP32-2432S028), or a repurposed
+"SmallTV" desk cube (the NMTech NM-TV) — the last three fed by a small JSON server.
 
 <p align="center">
   <img src="railinfoclients/Pixoo.jpeg" height="235"
@@ -134,11 +134,11 @@ that view in the background; once it lands, later polls get the real board (`"st
 default 30s), keeping the last good board if a refresh fails. So the server sits idle — and
 makes no API calls — whenever nothing is displaying it.
 
-### Run both displays
+### Run everything
 
-One process serves the Heltec's JSON API **and** streams to the Pixoo, sharing a single board
-cache — so the London-bound board is fetched from LDBWS **once** and used by both, instead of
-each display fetching it independently:
+One process serves the pull clients' JSON API **and** streams to the Pixoo, sharing a single
+board cache — so the London-bound board is fetched from LDBWS **once** however many displays
+consume it:
 
 ```bash
 uv run python -u main.py --serve --pixoo --loop --port 8000
@@ -148,13 +148,13 @@ uv run python -u main.py --serve --pixoo --loop --port 8000
 still run either side alone — `--serve` (API only) or `--pixoo --loop` (Pixoo only) — but
 together in one process is what avoids the duplicate upstream fetch.
 
-The two displays are independent: the JSON API stays up even if the Pixoo is powered off or off
-the network (the streamer just retries in the background until the panel reappears), so the
-Heltec keeps working on its own.
+The Pixoo and the JSON API are independent: the API stays up even if the Pixoo is powered off
+or off the network (the streamer just retries in the background until the panel reappears), so
+the pull clients keep working on their own.
 
 The clients can't resolve hostnames, so set the server's LAN IP (not a name) in each client's
-`config.py`. See the [Heltec README](clients/heltec/README.md) and
-[CYD README](clients/cyd/README.md) for flashing, fonts, view cycling, and configuration.
+`config.py`. See the [Heltec](clients/heltec/README.md), [CYD](clients/cyd/README.md), and
+[NM-TV](clients/nmtv/README.md) READMEs for flashing, fonts, view cycling, and configuration.
 
 ## Development
 
