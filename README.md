@@ -8,6 +8,22 @@ but with no Raspberry Pi hardware. It reads real-time data from the National Rai
 Heltec Wireless Paper), or a colour TFT (the CYD / ESP32-2432S028) — the last two fed by a
 small JSON server.
 
+<p align="center">
+  <img src="railinfoclients/Pixoo.jpeg" width="49%"
+       alt="Divoom Pixoo 64 on a windowsill showing three amber dot-matrix departures, a calling-at line, and a large clock">
+  <img src="railinfoclients/cyd.jpeg" width="49%"
+       alt="CYD colour TFT showing the departure board in dot-matrix style, with a cancelled service in red and a scrolling calling-at line">
+</p>
+<p align="center">
+  <img src="railinfoclients/Heltec.jpeg" width="98%"
+       alt="Heltec Wireless Paper e-ink display showing the Earlswood (Surrey) departure board with a delayed first service">
+</p>
+
+*The three clients live: the [Divoom Pixoo 64](#phase-2--pixoo-64-display-done) (top left), the
+[CYD colour TFT](clients/cyd/README.md) (top right, showing a cancellation in red), and the
+[Heltec Wireless Paper](clients/heltec/README.md) e-ink board (bottom, showing a delayed
+service as `09:42 :45`).*
+
 ## Phase 1 — LDBWS departure board (done)
 
 Fetches a station's live board and prints it to the terminal.
