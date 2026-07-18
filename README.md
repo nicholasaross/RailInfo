@@ -9,20 +9,23 @@ Heltec Wireless Paper), or a colour TFT (the CYD / ESP32-2432S028) — the last 
 small JSON server.
 
 <p align="center">
-  <img src="railinfoclients/Pixoo.jpeg" width="49%"
+  <img src="railinfoclients/Pixoo.jpeg" height="235"
        alt="Divoom Pixoo 64 on a windowsill showing three amber dot-matrix departures, a calling-at line, and a large clock">
-  <img src="railinfoclients/cyd.jpeg" width="49%"
+  <img src="railinfoclients/cyd.jpeg" height="235"
        alt="CYD colour TFT showing the departure board in dot-matrix style, with a cancelled service in red and a scrolling calling-at line">
+  <img src="railinfoclients/NM-TV.jpeg" height="235"
+       alt="NM-TV SmallTV cube - a repurposed ESP32 lottery miner - showing the departure board in amber dot-matrix on its 1.54 inch screen">
 </p>
 <p align="center">
   <img src="railinfoclients/Heltec.jpeg" width="98%"
        alt="Heltec Wireless Paper e-ink display showing the Earlswood (Surrey) departure board with a delayed first service">
 </p>
 
-*The three clients live: the [Divoom Pixoo 64](#phase-2--pixoo-64-display-done) (top left), the
-[CYD colour TFT](clients/cyd/README.md) (top right, showing a cancellation in red), and the
-[Heltec Wireless Paper](clients/heltec/README.md) e-ink board (bottom, showing a delayed
-service as `09:42 :45`).*
+*The four clients live: the [Divoom Pixoo 64](#phase-2--pixoo-64-display-done) (top left), the
+[CYD colour TFT](clients/cyd/README.md) (top middle, showing a cancellation in red), the
+[NM-TV cube](clients/nmtv/README.md) (top right — a repurposed ESP32 Bitcoin "lottery miner"
+desk gadget), and the [Heltec Wireless Paper](clients/heltec/README.md) e-ink board (bottom,
+showing a delayed service as `09:42 :45`).*
 
 ## Phase 1 — LDBWS departure board (done)
 
@@ -114,6 +117,9 @@ LAN display clients poll it over Wi-Fi and render a live board on-device:
   (MicroPython). A **hybrid**: the Heltec's pull/multi-view behaviour rendered in the Pixoo's
   colour dot-matrix look (amber/orange/red status colours), with view cycling by the BOOT button
   **or** a screen tap.
+- [NM-TV client](clients/nmtv/README.md) — a repurposed NMTech "SmallTV" desk gadget (ESP32 +
+  1.54" 240×240 ST7789 IPS; sold as a Bitcoin lottery miner). A port of the CYD client; view
+  cycling by the capacitive touch pad on the case top.
 
 Three views, chosen with `?view=`:
 

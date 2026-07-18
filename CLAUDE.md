@@ -94,6 +94,22 @@ mirrors `renderers/pixoo.py`). All three views are **landscape** (no portrait tr
   pull it low) — an IRQ design auto-cycled the view each poll and ate BOOT presses. Don't go back
   to IRQs on GPIO36.
 
+## NM-TV client (`clients/nmtv/`)
+
+**Fourth client** (added 2026-07-18): a repurposed **NMTech NM-TV-MINER v1.0** "SmallTV" desk
+gadget (Sparkle XH-32S = plain ESP32, no PSRAM; **1.54" 240×240 ST7789 IPS**, 10-pin FPC).
+A direct port of the CYD client (same strip-blit renderer, dotmatrix19 ×2 big rows, MODES
+cycle, scrolling footer) with two deltas: 240px-wide geometry (vertical layout identical) and
+**input = the case-top capacitive pad ("TC" → GPIO32, `machine.TouchPad`, startup-derived
+threshold)** + BOOT poll. Verified pin map (docs half-wrong for v1.0 — see
+`clients/nmtv/setup_log.md`, worth reading before touching ANY unknown display board):
+SPI(1) mode 0 @20MHz SCK=14 MOSI=13 CS=15 DC=2, no RST; **backlight = GPIO19 AND GPIO21 BOTH
+ACTIVE LOW, driven low BEFORE panel init** — miss that and every draw is invisible (this
+burned a full day chasing phantom pins; the "white flashes" during sweeps were backlight
+blinks revealing stale panel RAM). `_probe_interactive.py`/`probe_one.py` = the interactive
+pin-hunting tool that cracked it, kept for the next mystery board. Factory NMMiner v1.8.20
+dump = the restorable hardware-sanity anchor (kept OUT of the repo — licence keys + NVS WiFi).
+
 ## Gotchas
 
 - **The ESP repo `D:\Projects\ESP` is READ-ONLY** — copy out only, never modify. `depg0213.py`,
@@ -102,6 +118,14 @@ mirrors `renderers/pixoo.py`). All three views are **landscape** (no portrait tr
 - **CYD is on COM4** (CH340 USB-serial → **original ESP32, not S3**). MicroPython = generic
   `ESP32_GENERIC`, flashed at offset **`0x1000`** (NOT `0x0` — that's the S3). Confirm `flash-id`
   reports plain ESP32. `config.py` gitignored like the Heltec's.
+- **A second CYD** (different manufacturer, same model) was flashed + deployed 2026-07-18 —
+  enumerates as **COM5** (CH340), MAC `28:05:a5:2e:f3:30`, MicroPython 1.27.0 from
+  `D:\Projects\ESP\micropython.bin`. Its panel **works with the unchanged ILI9342-tuned driver**
+  (visually confirmed), device DHCP `192.168.1.147`. Same deploy flow: `deploy.ps1 -Port COM5`.
+- **COM5 is shared**: the second CYD and the NM-TV both have CH340s and both enumerate as COM5
+  (one attached at a time). Always `esptool flash-id` + eyeball which device is plugged in
+  before flashing — the NM-TV and CYD flash the same way (ESP32_GENERIC @ `0x1000`) but run
+  different clients.
 - `mpremote` installed via `uv tool install mpremote`; `esptool` lives in `D:\Projects\ESP\.venv`.
 - **Network ops need the sandbox disabled** (uv fetching freetype-py; the server's LDBWS calls).
   Serial (mpremote) and loopback curl do not.
@@ -140,11 +164,35 @@ writes a prebuilt-image compose + LF-normalised `.env` and runs compose up. Rede
 
 ---
 
-## RESUME HERE — 2026-07-01
+## RESUME HERE — 2026-07-18
 
-**All four phases done and live** (NAS container on `192.168.1.10:8088`; Heltec polls it). This
-session adds a **third client: the CYD colour-TFT client** (`clients/cyd/`) — see the "CYD client"
-section above. Server unchanged; the Heltec is untouched.
+**All four phases done and live** (NAS container on `192.168.1.10:8088`; Heltec polls it).
+
+### Done this session (2026-07-18, later) — NM-TV fourth client
+- **Ported the CYD client to an NMTech NM-TV-MINER v1.0** ("SmallTV" ESP32 lottery-miner desk
+  gadget, COM5) → `clients/nmtv/` — see the "NM-TV client" section above. Factory NMMiner
+  v1.8.20 dumped (restorable; kept out of the repo), MicroPython ESP32_GENERIC flashed at
+  `0x1000`. **The whole bring-up was a backlight trap**: the display data pins were the
+  documented ones all along (CS=15 DC=2), but BOTH GPIO19+21 must be LOW (before init) for
+  anything to be visible — full saga + lessons in `clients/nmtv/setup_log.md`. Touch pad =
+  GPIO32 capacitive (found by TouchPad scan). **Live end-to-end + autostart confirmed**
+  (device DHCP `192.168.1.206`, NAS board rendered, touch cycles views). Repo pruned to
+  production files + `_probe_interactive.py`/`probe_one.py` (the reusable pin hunter).
+
+### Done this session (2026-07-18)
+- **README photo gallery**: `railinfoclients/` (Pixoo.jpeg / Heltec.jpeg / cyd.jpeg) added to
+  the README intro. Photos were resized to 1600px and **EXIF-stripped (they carried GPS data)**
+  before committing; untouched originals only in the (ephemeral) session scratchpad. Committed
+  `0324537`, pushed.
+- **Second CYD deployed** (different manufacturer, same ESP32-2432S028 model): COM5, flashed
+  `ESP32_GENERIC` 1.27.0 at `0x1000`, deployed via `deploy.ps1 -Port COM5` (same client code +
+  existing `config.py`), smoketest green (WiFi `192.168.1.147`, live NAS board), autostart
+  installed. **Panel works with the unchanged ILI9342-tuned driver** — user visually confirmed;
+  no code changes anywhere this deploy.
+
+### Prior — 2026-07-01
+This session added a **third client: the CYD colour-TFT client** (`clients/cyd/`) — see the
+"CYD client" section above. Server unchanged; the Heltec is untouched.
 
 ### Done this session (2026-07-01) — new CYD (ESP32-2432S028) hybrid client
 - **Goal**: a hybrid of the two existing clients — the Heltec's pull/multi-view behaviour in the
