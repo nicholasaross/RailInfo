@@ -68,7 +68,8 @@ BWS_API_KEY_LNDB  / LDBWS_BASE_URL_LNDB    # Live Next Departures Board (filtere
 BWS_API_KEY_SD    / LDBWS_BASE_URL_SD      # Service Details (calling points for one serviceID)
 STATION_CRS="ELD"                          # default station (Earlswood, Surrey)
 FILTER_CRS_LIST="LBG,VIC,RDH"              # optional; destinations for --next
-DIRECTION_FILTER_CRS="LBG"                 # optional; default direction filter (e.g. London-bound)
+DIRECTION_FILTER_CRS="RDH"                 # optional; default direction filter (northbound: every
+                                           # up train calls at Redhill next — LBG would miss Victoria trains)
 DIRECTION_FILTER_TYPE="to"                 # "to" (calls here after) or "from" (came via here)
 ```
 
@@ -123,7 +124,7 @@ LAN display clients poll it over Wi-Fi and render a live board on-device:
 
 Three views, chosen with `?view=`:
 
-- `departures` (default) — London-bound board with the "calling at…" line (landscape).
+- `departures` (default) — northbound board with the "calling at…" line (landscape).
 - `all` — every departure, no direction filter (portrait).
 - `arrivals` — arriving services, labelled by origin (portrait).
 
@@ -137,7 +138,7 @@ makes no API calls — whenever nothing is displaying it.
 ### Run everything
 
 One process serves the pull clients' JSON API **and** streams to the Pixoo, sharing a single
-board cache — so the London-bound board is fetched from LDBWS **once** however many displays
+board cache — so the northbound board is fetched from LDBWS **once** however many displays
 consume it:
 
 ```bash

@@ -17,7 +17,7 @@ SAMPLE = {
     "generated_at": "2026-06-23T14:52:00",
     "stops_index": 0,
     "calling_at": ["Redhill", "Merstham", "East Croydon", "London Bridge"],
-    # London-bound only (matches the live DIRECTION_FILTER_CRS=LBG board).
+    # Northbound only (matches the live DIRECTION_FILTER_CRS=RDH board).
     "services": [
         {"time": "14:55", "expected": "15:03", "destination": "Peterborough", "platform": "1", "is_cancelled": False},
         {"time": "15:12", "expected": "Cancelled", "destination": "Bedford", "platform": None, "is_cancelled": True},

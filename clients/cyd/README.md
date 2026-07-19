@@ -42,7 +42,7 @@ Input is hybrid: the **BOOT button (GPIO0)** *and* a **screen tap** both cycle t
 controller's pressure over SoftSPI. (The XPT2046 IRQ line, GPIO36, is *not* used: on this board it
 fires spuriously ~9×/s and a real tap doesn't pull it low — see `setup_log.md`.)
 
-1. **Departures** — big bold rows (2×-scaled dot-matrix), London-bound only (the server's
+1. **Departures** — big bold rows (2×-scaled dot-matrix), northbound only (the server's
    `DIRECTION_FILTER_CRS`), with a calling-points footer.
 2. **All departures** — dense list (1× dot-matrix), every direction.
 3. **Arrivals** — dense list, by origin.

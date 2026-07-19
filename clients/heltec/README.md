@@ -27,7 +27,7 @@ The **PRG button (GPIO0)** cycles three views. The press is caught by a **pin in
 takes effect on the next ~5s poll **whether or not the board data changed** — a press landing
 during the blocking fetch or the e-ink refresh is latched, not dropped:
 
-1. **Departures** — landscape, London-bound only (the server's `DIRECTION_FILTER_CRS`), with a
+1. **Departures** — landscape, northbound only (the server's `DIRECTION_FILTER_CRS`), with a
    calling-points footer.
 2. **All departures** — portrait, every direction.
 3. **Arrivals** — portrait, by origin.

@@ -2,7 +2,7 @@
 
 Three views, selected with ``?view=``:
 
-* ``departures`` (default) — the London-bound board with calling points (the Heltec's
+* ``departures`` (default) — the northbound board with calling points (the Heltec's
   landscape view, and what the Pixoo shows).
 * ``all`` — every departure, no direction filter (the Heltec's portrait view).
 * ``arrivals`` — arriving services, labelled by origin (portrait view).

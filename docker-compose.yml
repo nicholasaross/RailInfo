@@ -3,7 +3,7 @@
 
 services:
   # One process serves the Heltec's JSON API on :8000 AND streams to the Pixoo, sharing a
-  # single in-memory board cache so the London-bound board is fetched from LDBWS once for both.
+  # single in-memory board cache so the northbound board is fetched from LDBWS once for both.
   railinfo:
     build: .
     image: railinfo:latest
@@ -42,7 +42,7 @@ services:
   # --- Alternative: run the two displays as SEPARATE containers ------------------------
   # Prefer the single `railinfo` service above — it makes one shared LDBWS fetch. Split them
   # only if you want to run/restart the Pixoo and the Heltec API independently; doing so
-  # doubles the upstream calls for the shared London-bound board. To split: set the command on
+  # doubles the upstream calls for the shared northbound board. To split: set the command on
   # `railinfo` above to ["python", "main.py", "--pixoo", "--loop"] and uncomment the below.
   #
   # railinfo-server:

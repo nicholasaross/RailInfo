@@ -26,7 +26,7 @@ Data acquisition is decoupled from presentation behind `railinfo/domain` + `rail
   never raises a `PixooError`. That keeps the JSON server (sibling thread) alive when the Pixoo
   is down.
 - `railinfo/server.py` — **Phase 4 JSON API** (stdlib `http.server`). `python main.py --serve`.
-  Views via `?view=`: `departures` (default, London-bound, with calling points),
+  Views via `?view=`: `departures` (default, northbound, with calling points),
   `all` (every direction), `arrivals` (by origin). **`BoardCache`** holds the domain
   `DepartureBoard` per view (not JSON): **lazy on connect** (first request → `{"status":
   "starting"}` + background fetch; later polls get `"status":"ready"`), then
@@ -341,7 +341,11 @@ departures fetch; dev-box processes die when the box sleeps — the NAS doesn't.
 ### Decisions locked
 - Proportional fonts (NOT monospaced); 9 + 19 only; tabular/centred digits.
 - Delay notation `HH:MM :MM` on **both** Heltec and Pixoo; `cancelled` (lowercase) right-justified.
-- Direction filter `DIRECTION_FILTER_CRS=LBG` in `.env` drives the default London-bound view.
+- Direction filter `DIRECTION_FILTER_CRS=RDH` in `.env` drives the default **northbound** view
+  (changed from LBG 2026-07-19: filtering on London Bridge silently dropped London Victoria
+  services. Every northbound/Platform-1 train from Earlswood calls at Redhill next — including
+  all Victoria and London Bridge trains — and no southbound train does, so RDH ≡ northbound
+  and needs no code change; the LDBWS `filterCrs` still does the work server-side).
 - PRG=GPIO0 via **Pin IRQ** (not polling); portrait transpose 90° CW; PortraitCanvas 121×250.
 - Pixoo rows mirror the Heltec's right block (`P# HH:MM`), drawn **flush-right** (`SIZE + 1`
   absorbs the font side-bearing). **The station code is never truncated**: the right block
