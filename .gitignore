@@ -20,3 +20,4 @@ clients/nmtv/config.py
 *.log
 preview*.png
 clients/nmtv/nmminer_factory_backup.bin
+clients/nmtv/nmtv_unit2_factory_v1.8.26.bin

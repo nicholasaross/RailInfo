@@ -83,4 +83,10 @@ serial).
   truncate harder on the big rows. Vertical layout identical (both panels are 240 tall).
 - Input = TC capacitive pad (GPIO32 TouchPad, startup-derived threshold) + BOOT poll; no
   XPT2046, no touch SPI.
-- Backlight has no dimming control in the client (it's a hard on/off pair of rails).
+- Backlight: GPIO21 (pwr) is a held-low power enable; GPIO19 (bl) is now **PWM-dimmed**
+  (`boards.set_backlight`, `BL_BRIGHTNESS`, default 90%). The factory NMMiner firmware drives
+  the backlight via LEDC/PWM (a "Brightness 0-100" setting — confirmed in a firmware dump),
+  whereas the original client held bl at constant DC low. That constant DC drive made the
+  backlight LED string glare as "obvious LEDs" at the base of the panel; PWMing the active-low
+  line (100% == pin held low == the old full-on) removed the glare. Verified on unit 2
+  (2026-07-31, factory image backed up to `nmtv_unit2_factory_v1.8.26.bin`, gitignored).

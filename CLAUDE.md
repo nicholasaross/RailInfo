@@ -103,12 +103,18 @@ cycle, scrolling footer) with two deltas: 240px-wide geometry (vertical layout i
 **input = the case-top capacitive pad ("TC" → GPIO32, `machine.TouchPad`, startup-derived
 threshold)** + BOOT poll. Verified pin map (docs half-wrong for v1.0 — see
 `clients/nmtv/setup_log.md`, worth reading before touching ANY unknown display board):
-SPI(1) mode 0 @20MHz SCK=14 MOSI=13 CS=15 DC=2, no RST; **backlight = GPIO19 AND GPIO21 BOTH
-ACTIVE LOW, driven low BEFORE panel init** — miss that and every draw is invisible (this
-burned a full day chasing phantom pins; the "white flashes" during sweeps were backlight
+SPI(1) mode 0 @20MHz SCK=14 MOSI=13 CS=15 DC=2, no RST; **backlight = GPIO19 (bl) + GPIO21
+(pwr), BOTH ACTIVE LOW, driven low BEFORE panel init** — miss that and every draw is invisible
+(this burned a full day chasing phantom pins; the "white flashes" during sweeps were backlight
 blinks revealing stale panel RAM). `_probe_interactive.py`/`probe_one.py` = the interactive
-pin-hunting tool that cracked it, kept for the next mystery board. Factory NMMiner v1.8.20
-dump = the restorable hardware-sanity anchor (kept OUT of the repo — licence keys + NVS WiFi).
+pin-hunting tool that cracked it, kept for the next mystery board. **Backlight is PWM-dimmed**
+(2026-07-31): the factory NMMiner firmware drives the backlight via LEDC/PWM (a "Brightness
+0-100" setting — confirmed by dumping a fresh unit's firmware), so `boards.set_backlight` now
+PWMs the active-low bl line (`BL_BRIGHTNESS`, default 90; 100 == pin held low == old full-on
+DC). The old constant-DC drive made the backlight LED string glare as "obvious LEDs" at the
+base of the panel; PWMing it fixed that with the panel reading about as bright. Factory NMMiner
+dump = the restorable hardware-sanity anchor (kept OUT of the repo — licence keys + NVS WiFi;
+unit 1 = v1.8.20 `nmminer_factory_backup.bin`, unit 2 = v1.8.26 `nmtv_unit2_factory_v1.8.26.bin`).
 
 ## Gotchas
 
