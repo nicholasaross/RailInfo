@@ -23,7 +23,7 @@ Luckyminer LV02) — the last four fed by a small JSON server.
 </p>
 <p align="center">
   <img src="railinfoclients/LV02.jpeg" width="98%"
-       alt="Luckyminer LV02 - a LilyGo T-Display-S3 clone - in landscape showing the Earlswood (Surrey) board: two Bedford departures at P1 09:10 and 10:10, an 08:51 clock, and a scrolling calling-at line">
+       alt="Luckyminer LV02 - a LilyGo T-Display-S3 clone - in landscape showing the Earlswood (Surrey) board: two Bedford departures at P1 09:10 and 10:10, a 09:04 clock, and a scrolling calling-at line (London Blackfriars, Farringdon, London...)">
 </p>
 
 *The five clients live: the [Divoom Pixoo 64](#phase-2--pixoo-64-display-done) (top left), the
