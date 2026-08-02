@@ -75,18 +75,42 @@ def _fill(n: int, hi: int, lo: int, keep: int, wrb: int):
         i += 1
 
 
+@micropython.viper
+def _blit_t(buf: ptr8, rw: int, rh: int, lut: ptr32, keep: int, wrb: int):
+    # Transposed blit for landscape: source is landscape row-major (rw wide, rh tall, lx-fast);
+    # emit physical-column-fast (xp = rh-1-ly inner, yp = lx outer) so a 90deg-rotated rect fills
+    # correctly. Inner loop walks ly from rh-1 down to 0 (=increasing physical CASET).
+    out1 = ptr32(uint(0x60004010))
+    clr = ptr32(uint(0x6000400C))
+    setr = ptr32(uint(0x60004008))
+    lx = 0
+    while lx < rw:
+        ly = rh - 1
+        while ly >= 0:
+            off = ((ly * rw + lx) << 1)
+            out1[0] = keep | int(lut[int(buf[off])]); clr[0] = wrb; setr[0] = wrb
+            out1[0] = keep | int(lut[int(buf[off + 1])]); clr[0] = wrb; setr[0] = wrb
+            ly -= 1
+        lx += 1
+
+
 class ST7789:
     def __init__(self, *, power, bl, cs, dc, rst, wr, rd, data,
-                 width=320, height=170, rotation=0x60, xoff=0, yoff=35,
-                 swap=True, inversion=True):
+                 width=320, height=170, rotation=0xC0, xoff=0, yoff=0,
+                 swap=False, landscape=True, coloff=35, glassw=170, inversion=True):
         self.width = width
         self.height = height
         self._rot = rotation
         self._xoff = xoff
         self._yoff = yoff
-        # swap=True (landscape, MADCTL MV set): the wide axis (x, up to 319) must go to RASET,
-        # the narrow glass axis (y, +offset) to CASET - otherwise x overflows CASET's 240 range.
         self._swap = swap
+        # landscape=True: renderer sees width x height (320x170) but the physical panel is portrait
+        # (170 cols x 320 rows). block()/_window rotate 90deg (xp = glassw-1-ly, yp = lx) and the
+        # pixel stream is transposed (_blit_t), because the ST7789 RAMWR is always column-fast so a
+        # 320-wide strip can't go straight to CASET (max 240).
+        self._landscape = landscape
+        self._coloff = coloff        # physical column offset for the 170-wide glass (35)
+        self._glassw = glassw        # 170
         self._inv = inversion
         self._lut = _make_lut()
         self._wrb = 1 << wr
@@ -141,8 +165,12 @@ class ST7789:
         self._cmd(_DISPON); sleep_ms(20)
 
     def _window(self, x0, y0, x1, y1):
-        if self._swap:
-            # CASET <- y (narrow glass axis, +yoff);  RASET <- x (wide axis, +xoff)
+        if self._landscape:
+            # 90deg rotate: xp = glassw-1-ly (physical column, +coloff), yp = lx (physical row)
+            g = self._glassw - 1
+            ca0 = (g - y1) + self._coloff; ca1 = (g - y0) + self._coloff
+            ra0 = x0; ra1 = x1
+        elif self._swap:
             ca0 = y0 + self._yoff; ca1 = y1 + self._yoff
             ra0 = x0 + self._xoff; ra1 = x1 + self._xoff
         else:
@@ -158,7 +186,12 @@ class ST7789:
         mem32[_OUT0_SET] = self._dcb
         mem32[_OUT0_CLR] = self._csb
         keep = mem32[_OUT1] & ~_DMASK
-        _blit(buf, len(buf), self._lut, keep, self._wrb)
+        if self._landscape:
+            rw = x1 - x0 + 1
+            rh = y1 - y0 + 1
+            _blit_t(buf, rw, rh, self._lut, keep, self._wrb)
+        else:
+            _blit(buf, len(buf), self._lut, keep, self._wrb)
         mem32[_OUT0_SET] = self._csb
 
     def fill_rectangle(self, x, y, w, h, color565):

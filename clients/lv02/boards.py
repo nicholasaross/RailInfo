@@ -15,10 +15,12 @@ from st7789 import ST7789
 LV02 = {
     "power": 15, "bl": 38, "cs": 6, "dc": 7, "rst": 5, "wr": 8, "rd": 9,
     "data": (39, 40, 41, 42, 45, 46, 47, 48),
-    "width": 170, "height": 320,       # NATIVE PORTRAIT (no MV transpose -> correct data order)
-    "rotation": 0xC0,                  # MADCTL MX|MY (un-mirror X + flip Y -> upright, readable)
-    "xoff": 35, "yoff": 0,             # 170-wide glass sits at controller columns 35..204
-    "swap": False,                     # portrait: x->CASET, y->RASET directly
+    "width": 320, "height": 170,       # LANDSCAPE (driver transposes 90deg onto the portrait glass)
+    "rotation": 0xC0,                  # physical-panel MADCTL (MX|MY); transpose does the rotation
+    "xoff": 35, "yoff": 0,
+    "swap": False,
+    "landscape": True,                 # rotate 90deg in the driver (ST7789 RAMWR is column-fast)
+    "coloff": 35, "glassw": 170,       # 170-wide glass at physical columns 35..204
     "inversion": True,                 # IPS -> INVON for normal colours
     "button": 0,                       # BOOT (GPIO0) cycles views
     "touch": None,                     # no capacitive pad on this board
@@ -31,6 +33,8 @@ def init_display():
         power=b["power"], bl=b["bl"], cs=b["cs"], dc=b["dc"], rst=b["rst"],
         wr=b["wr"], rd=b["rd"], data=b["data"],
         width=b["width"], height=b["height"], rotation=b["rotation"],
-        xoff=b["xoff"], yoff=b["yoff"], swap=b["swap"], inversion=b["inversion"],
+        xoff=b["xoff"], yoff=b["yoff"], swap=b["swap"],
+        landscape=b["landscape"], coloff=b["coloff"], glassw=b["glassw"],
+        inversion=b["inversion"],
     )
     return display, b
