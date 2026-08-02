@@ -21,14 +21,17 @@ Luckyminer LV02) — the last four fed by a small JSON server.
   <img src="railinfoclients/Heltec.jpeg" width="98%"
        alt="Heltec Wireless Paper e-ink display showing the Earlswood (Surrey) departure board with a delayed first service">
 </p>
+<p align="center">
+  <img src="railinfoclients/LV02.jpeg" width="98%"
+       alt="Luckyminer LV02 - a LilyGo T-Display-S3 clone - in landscape showing the Earlswood (Surrey) board: two Bedford departures at P1 09:10 and 10:10, an 08:51 clock, and a scrolling calling-at line">
+</p>
 
-*Four of the five clients are pictured: the [Divoom Pixoo 64](#phase-2--pixoo-64-display-done)
-(top left), the [CYD colour TFT](clients/cyd/README.md) (top middle, showing a cancellation in
-red), the [NM-TV cube](clients/nmtv/README.md) (top right — a repurposed ESP32 Bitcoin "lottery
-miner" desk gadget), and the [Heltec Wireless Paper](clients/heltec/README.md) e-ink board
-(bottom, showing a delayed service as `09:42 :45`). The fifth, the
-[Luckyminer LV02](clients/lv02/README.md) — another lottery-miner gadget, this one a LilyGo
-T-Display-S3 clone — is not pictured.*
+*The five clients live: the [Divoom Pixoo 64](#phase-2--pixoo-64-display-done) (top left), the
+[CYD colour TFT](clients/cyd/README.md) (top middle, showing a cancellation in red), the
+[NM-TV cube](clients/nmtv/README.md) (top right — a repurposed ESP32 Bitcoin "lottery miner"
+desk gadget), the [Heltec Wireless Paper](clients/heltec/README.md) e-ink board (middle, showing
+a delayed service as `09:42 :45`), and the [Luckyminer LV02](clients/lv02/README.md) (bottom —
+another lottery-miner gadget, a LilyGo T-Display-S3 clone, in landscape).*
 
 ## Phase 1 — LDBWS departure board (done)
 
