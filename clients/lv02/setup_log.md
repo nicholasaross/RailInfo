@@ -25,11 +25,13 @@ reference and were confirmed by an on-panel init + colour fill + the live client
   renderer is a drop-in. Data bus + WR strobe are driven via `machine.mem32` to the S3 GPIO
   registers; the hot pixel loops are `@micropython.viper` (full-screen push < ~1s).
   Data-bus byte -> GPIO_OUT1 (0x60004010) bits 7,8,9,10,13,14,15,16 (mask 0x1E780).
-- **Currently NATIVE PORTRAIT 170x320** (`boards.py`: rotation `0xC0` MX|MY, xoff=35, yoff=0,
-  swap=False). This is the guaranteed-correct data order (no transpose). **Landscape (320x170)
-  is still TODO** - it needs a transpose because the ST7789 RAMWR is always column-fast, so a
-  320-wide strip overflows CASET (max 240). Do it like the Heltec's PortraitCanvas (render
-  landscape, transpose 90deg in `block`), NOT via MADCTL MV alone (that garbled the data order).
+- **LANDSCAPE 320x170** (`boards.py`: `landscape=True`; physical MADCTL `0xC0`, coloff=35,
+  glassw=170). The driver presents 320x170 to the renderer and rotates 90deg onto the portrait
+  glass: `_window` maps landscape (lx,ly) -> physical (xp=glassw-1-ly, yp=lx), and `block()`
+  streams via a transposing viper blit (`_blit_t`) so each rotated rect fills column-fast. This
+  was necessary because the ST7789 RAMWR is always column-fast (a 320-wide strip overflows CASET
+  max 240) and MADCTL MV alone garbled the data order. A native-portrait path (swap=False, no
+  transpose) is still in the driver if ever needed.
 
 ## Flash / deploy
 - MicroPython **ESP32_GENERIC_S3** (`D:\Projects\ESP\micropython_s3.bin`, v1.28) flashed at
@@ -40,5 +42,5 @@ reference and were confirmed by an on-panel init + colour fill + the live client
   autostart** (zero live-USB dependency). Avoid `mpremote reset`.
 
 ## Status
-Live end-to-end: WiFi startup screen -> live NAS board -> departures/all/arrivals views cycle on
-the BOOT button. Portrait looks good; **landscape for the main board is the next task.**
+DONE - live end-to-end in **landscape 320x170**: WiFi startup screen -> live NAS board ->
+departures/all/arrivals views cycle on the BOOT button. Upright, readable, no garbling.
