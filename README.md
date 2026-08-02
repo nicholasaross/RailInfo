@@ -5,8 +5,9 @@ A software-only live National Rail departure board, inspired by
 but with no Raspberry Pi hardware. It reads real-time data from the National Rail
 **LDBWS** REST API (via the Rail Data Marketplace) and renders it to the terminal, a
 [Divoom Pixoo 64](https://divoom.com/products/pixoo-64), a battery e-ink board (a
-Heltec Wireless Paper), a colour TFT (the CYD / ESP32-2432S028), or a repurposed
-"SmallTV" desk cube (the NMTech NM-TV) — the last three fed by a small JSON server.
+Heltec Wireless Paper), a colour TFT (the CYD / ESP32-2432S028), a repurposed
+"SmallTV" desk cube (the NMTech NM-TV), or a Bitcoin "lottery-miner" gadget (the
+Luckyminer LV02) — the last four fed by a small JSON server.
 
 <p align="center">
   <img src="railinfoclients/Pixoo.jpeg" height="235"
@@ -21,11 +22,13 @@ Heltec Wireless Paper), a colour TFT (the CYD / ESP32-2432S028), or a repurposed
        alt="Heltec Wireless Paper e-ink display showing the Earlswood (Surrey) departure board with a delayed first service">
 </p>
 
-*The four clients live: the [Divoom Pixoo 64](#phase-2--pixoo-64-display-done) (top left), the
-[CYD colour TFT](clients/cyd/README.md) (top middle, showing a cancellation in red), the
-[NM-TV cube](clients/nmtv/README.md) (top right — a repurposed ESP32 Bitcoin "lottery miner"
-desk gadget), and the [Heltec Wireless Paper](clients/heltec/README.md) e-ink board (bottom,
-showing a delayed service as `09:42 :45`).*
+*Four of the five clients are pictured: the [Divoom Pixoo 64](#phase-2--pixoo-64-display-done)
+(top left), the [CYD colour TFT](clients/cyd/README.md) (top middle, showing a cancellation in
+red), the [NM-TV cube](clients/nmtv/README.md) (top right — a repurposed ESP32 Bitcoin "lottery
+miner" desk gadget), and the [Heltec Wireless Paper](clients/heltec/README.md) e-ink board
+(bottom, showing a delayed service as `09:42 :45`). The fifth, the
+[Luckyminer LV02](clients/lv02/README.md) — another lottery-miner gadget, this one a LilyGo
+T-Display-S3 clone — is not pictured.*
 
 ## Phase 1 — LDBWS departure board (done)
 
@@ -121,6 +124,10 @@ LAN display clients poll it over Wi-Fi and render a live board on-device:
 - [NM-TV client](clients/nmtv/README.md) — a repurposed NMTech "SmallTV" desk gadget (ESP32 +
   1.54" 240×240 ST7789 IPS; sold as a Bitcoin lottery miner). A port of the CYD client; view
   cycling by the capacitive touch pad on the case top.
+- [LV02 client](clients/lv02/README.md) — a Luckyminer LV02 (another Bitcoin lottery-miner
+  gadget, a **LilyGo T-Display-S3 clone**: ESP32-S3 + 1.9" 170×320 ST7789 on an **8-bit parallel
+  (i8080) bus**, not SPI). Same renderer, driven by a purpose-built parallel driver; view cycling
+  by the BOOT button.
 
 Three views, chosen with `?view=`:
 
@@ -154,8 +161,9 @@ or off the network (the streamer just retries in the background until the panel 
 the pull clients keep working on their own.
 
 The clients can't resolve hostnames, so set the server's LAN IP (not a name) in each client's
-`config.py`. See the [Heltec](clients/heltec/README.md), [CYD](clients/cyd/README.md), and
-[NM-TV](clients/nmtv/README.md) READMEs for flashing, fonts, view cycling, and configuration.
+`config.py`. See the [Heltec](clients/heltec/README.md), [CYD](clients/cyd/README.md),
+[NM-TV](clients/nmtv/README.md), and [LV02](clients/lv02/README.md) READMEs for flashing, fonts,
+view cycling, and configuration.
 
 ## Development
 
@@ -184,6 +192,9 @@ renderer — terminal, Pixoo, and the e-ink client's JSON server — shares one 
 - `railinfo/server.py` — Phase 4 JSON API (`--serve`); projects the domain model to `/board`.
 - `clients/heltec/` — MicroPython e-ink client (polls the server; see its own README).
 - `clients/cyd/` — MicroPython colour-TFT client (ESP32-2432S028; strip-blit dot-matrix renderer).
+- `clients/nmtv/` — MicroPython client for the NMTech NM-TV cube (ESP32 + SPI ST7789).
+- `clients/lv02/` — MicroPython client for the Luckyminer LV02 (ESP32-S3 + **parallel** ST7789;
+  its `lib/st7789.py` is a purpose-built i8080 driver that transposes 90° for landscape).
 - `tests/` — pytest suite; `scripts/` — `preview_board.py` (offline PNG preview) and
   `deploy-to-nas.ps1` (build + ship the image to the NAS over SSH).
 
