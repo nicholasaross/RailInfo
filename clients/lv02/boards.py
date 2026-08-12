@@ -20,7 +20,8 @@ LV02 = {
     "xoff": 35, "yoff": 0,
     "swap": False,
     "landscape": True,                 # rotate 90deg in the driver (ST7789 RAMWR is column-fast)
-    "coloff": 35, "glassw": 170,       # 170-wide glass at physical columns 35..204
+    "coloff": 34, "glassw": 170,       # 170-wide glass at physical columns 34..203 (was 35: shifted
+                                       # the image up 1px, top row wrapped to the bottom)
     "inversion": True,                 # IPS -> INVON for normal colours
     "button": 0,                       # BOOT (GPIO0) cycles views
     "touch": None,                     # no capacitive pad on this board

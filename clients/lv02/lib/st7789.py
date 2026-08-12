@@ -97,13 +97,20 @@ def _blit_t(buf: ptr8, rw: int, rh: int, lut: ptr32, keep: int, wrb: int):
 class ST7789:
     def __init__(self, *, power, bl, cs, dc, rst, wr, rd, data,
                  width=320, height=170, rotation=0xC0, xoff=0, yoff=0,
-                 swap=False, landscape=True, coloff=35, glassw=170, inversion=True):
+                 swap=False, landscape=True, coloff=34, glassw=170, inversion=True,
+                 porchpad=1):
         self.width = width
         self.height = height
         self._rot = rotation
         self._xoff = xoff
         self._yoff = yoff
         self._swap = swap
+        # This glass is effectively 1px "taller" than the 170-wide content window: with coloff
+        # tuned so the 170 content columns [coloff .. coloff+glassw-1] land correctly, the top
+        # edge physical column (coloff+glassw) is never written and shows uninitialised RAM as
+        # multi-coloured static. `porchpad` columns above the content are blanked to black by
+        # clear() to kill it (landscape only). 0 disables.
+        self._porchpad = porchpad
         # landscape=True: renderer sees width x height (320x170) but the physical panel is portrait
         # (170 cols x 320 rows). block()/_window rotate 90deg (xp = glassw-1-ly, yp = lx) and the
         # pixel stream is transposed (_blit_t), because the ST7789 RAMWR is always column-fast so a
@@ -206,8 +213,30 @@ class ST7789:
         _fill(w * h, hi, lo, keep, self._wrb)
         mem32[_OUT0_SET] = self._csb
 
+    def _blank_porch(self):
+        """Blank the porch column(s) just above the content window to black (landscape only).
+
+        Physical CASET = [coloff+glassw .. coloff+glassw+porchpad-1] (the top edge lines that the
+        170-column content never reaches), RASET = all physical rows. Solid black, so the top edge
+        reads as an unlit border instead of static. No-op if porchpad<=0 or not landscape.
+        """
+        if not self._landscape or self._porchpad <= 0:
+            return
+        ca0 = self._coloff + self._glassw
+        ca1 = ca0 + self._porchpad - 1
+        ra1 = self.width - 1                 # physical rows = landscape width (320)
+        self._cmd(_CASET); self._data(ca0 >> 8, ca0 & 0xFF, ca1 >> 8, ca1 & 0xFF)
+        self._cmd(_RASET); self._data(0, 0, ra1 >> 8, ra1 & 0xFF)
+        self._cmd(_RAMWR)
+        mem32[_OUT0_SET] = self._dcb
+        mem32[_OUT0_CLR] = self._csb
+        keep = mem32[_OUT1] & ~_DMASK
+        _fill((ca1 - ca0 + 1) * self.width, 0, 0, keep, self._wrb)
+        mem32[_OUT0_SET] = self._csb
+
     def clear(self, color565=0x0000):
         self.fill_rectangle(0, 0, self.width, self.height, color565)
+        self._blank_porch()
 
 
 def color565(r, g, b):

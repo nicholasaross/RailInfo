@@ -41,6 +41,21 @@ reference and were confirmed by an on-panel init + colour fill + the live client
   unplug/replug. Most robust workflow: `mpremote cp ... :main.py` then **power-cycle to
   autostart** (zero live-USB dependency). Avoid `mpremote reset`.
 
+## Vertical 1px offset / top-edge static (fixed 2026-08-12)
+Symptom: the image sat 1px too high and the top row wrapped to the bottom of the screen.
+This glass is effectively **171 physical columns visible**, not a clean 170: the content
+window is 170 wide at `coloff`, but one edge line always falls outside it.
+
+- **`coloff` 35 -> 34** places the 170 content columns correctly (`[34..203]`) and removes the
+  bottom wrap. But that leaves the very top physical column (`coloff+glassw` = **204**) unwritten
+  -> uninitialised RAM shows as multi-coloured static.
+- Fix: the driver now **blanks that porch line** to black in `clear()` (`_blank_porch`,
+  `porchpad=1`). Nothing ever draws content there, so blanking once per full repaint is enough.
+- If a thin static line ever returns at the top, bump `porchpad` (2, 3, ...) in `boards.py`.
+- Don't "fix" this by nudging `coloff` alone - it just swaps which edge breaks (35 = bottom
+  wrap, 34 = top static). Keep `coloff=34` + the porch blank.
+
 ## Status
 DONE - live end-to-end in **landscape 320x170**: WiFi startup screen -> live NAS board ->
-departures/all/arrivals views cycle on the BOOT button. Upright, readable, no garbling.
+departures/all/arrivals views cycle on the BOOT button. Upright, readable, no garbling, no
+top/bottom-edge artifacts (see the vertical-offset fix above).

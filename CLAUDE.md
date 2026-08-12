@@ -116,6 +116,38 @@ base of the panel; PWMing it fixed that with the panel reading about as bright. 
 dump = the restorable hardware-sanity anchor (kept OUT of the repo — licence keys + NVS WiFi;
 unit 1 = v1.8.20 `nmminer_factory_backup.bin`, unit 2 = v1.8.26 `nmtv_unit2_factory_v1.8.26.bin`).
 
+## LV02 client (`clients/lv02/`)
+
+**Fifth client** (added 2026-08-01): a repurposed **Luckyminer LV02** BTC lottery-miner gadget
+that is a **LilyGo T-Display-S3 CLONE** — **ESP32-S3, 16MB flash, NO PSRAM**, native USB-JTAG
+(COM7). The 1.9" **170×320 ST7789** is on an **8-bit PARALLEL (i8080) bus, NOT SPI** — that was
+the whole bring-up saga (full log in `clients/lv02/setup_log.md`; the memory note is the fast
+read). Same pull/multi-view client as the NM-TV — it reuses the NM-TV `railinfo_client.py`
+unchanged (single BOOT button GPIO0, `touch=None`); only `boards.py` + the parallel driver differ.
+
+- Driver `lib/st7789.py` — a **parallel-i8080 ST7789** driver with the same tiny public API
+  (`block`/`fill_rectangle`/`clear`/`color565`), so the strip-blit renderer is a drop-in. The data
+  bus + WR strobe are driven via `machine.mem32` to the S3 GPIO registers and the hot pixel loops
+  are `@micropython.viper` (full-screen push < ~1s). Verified pinout (= T-Display-S3): POWER_ON=15
+  BL=38 CS=6 DC=7 RST=5 WR=8 RD=9; data D0..D7 = 39,40,41,42,45,46,47,48 (43/44 are UART0, skipped).
+- **LANDSCAPE 320×170** (`landscape=True`; physical MADCTL `0xC0`, `glassw=170`). The driver
+  presents 320×170 and rotates 90° onto the portrait glass: `_window` maps landscape (lx,ly) →
+  physical (xp=glassw-1-ly, yp=lx) and `block()` streams via a transposing viper blit `_blit_t`
+  (ST7789 RAMWR is column-fast, so a 320-wide strip can't go straight to CASET; MADCTL MV alone
+  garbled the order). A native-portrait path is still in the driver if ever needed.
+- **Vertical 1px offset / top-edge static (fixed 2026-08-12).** This glass is effectively **171
+  visible columns**, not a clean 170, so the 170-wide content window always leaves one edge line
+  out. `coloff=34` places content correctly (`[34..203]`) and avoids a bottom wrap, but the top
+  physical column (`coloff+glassw`=204) is then never written → uninitialised RAM shows as
+  multi-coloured static. Fix: `clear()` **blanks the porch line(s) to black** (`_blank_porch`,
+  `porchpad=1`). **Don't chase this with `coloff` alone — it only swaps which edge breaks** (35 =
+  bottom wrap, 34 = top static). Bump `porchpad` if a thin static line ever returns.
+- **USB-Serial/JTAG WEDGES** constantly with mpremote (esp. on `reset`) — recovery is a physical
+  unplug/replug. Robust flow: `mpremote cp … :main.py` then **power-cycle to autostart** (avoid
+  `mpremote reset`). Deploy: `deploy.ps1 -Port COM7 [-Autostart]`; MicroPython ESP32_GENERIC_S3
+  flashed at **`0x0`**. Factory NerdMiner V2 dump = `lv02_factory.bin` (gitignored — licence keys +
+  NVS WiFi). `config.py` gitignored.
+
 ## Gotchas
 
 - **The ESP repo `D:\Projects\ESP` is READ-ONLY** — copy out only, never modify. `depg0213.py`,
