@@ -148,6 +148,38 @@ unchanged (single BOOT button GPIO0, `touch=None`); only `boards.py` + the paral
   flashed at **`0x0`**. Factory NerdMiner V2 dump = `lv02_factory.bin` (gitignored — licence keys +
   NVS WiFi). `config.py` gitignored.
 
+## Apex Pro TKL OLED client (`clients/apexpro/`)
+
+**Sixth client** (added 2026-09-18) and the **first host-side one** — it runs on the Windows
+dev box, not on an ESP32. Streams the `departures` board to a **SteelSeries Apex Pro TKL**'s
+128×40 monochrome OLED via **GameSense** (SteelSeries GG's local HTTP/JSON server). Same pull
+model as the others (polls `/board`), but the "device" is the keyboard screen driven through GG.
+The panel is on the **"Legacy" Apex Pro TKL** (2020/2023, firmware `4.16.x`); the Gen 3's colour
+screen is a different device type and is not handled.
+
+- **Bitmap, not text.** GameSense's built-in multi-line text handler only fits ~2 lines on
+  128×40, so we render our own 1-bit frame (`render.py`, Pillow + the same
+  `Fonts/dot-matrix-regular.ttf` and threshold trick as `renderers/pixoo.py`) and push it as raw
+  `image-data-128x40` (a 640-byte array; MSB-first, row-major, `1` = lit). The handler is bound
+  **once** with a 640-byte **blank default** image-data (an empty `[]` → HTTP 500); the live
+  bytes then arrive per-event in the `image-data-128x40` context-frame key. `--text` falls back
+  to the built-in text handler.
+- **Four service rows, no scroll.** The OLED's refresh rate can't animate a marquee smoothly, so
+  the whole height shows more services (destination left; platform + time right) instead of one
+  service's calling points. **Font size 10 only** — the Dot Matrix face renders off-grid
+  ("corrupt") at 13; 10 is the Pixoo's clean size. `_TOP=0` (not `-1`, which clipped the top
+  pixel row). Status rides in the text (mono panel, no colour): delayed `HH:MM :MM`, `CANC`.
+- **Tabular digits** ported from `pixoo.py` (`_char_widths`/`_draw_tabular`): every digit in a
+  fixed widest-digit cell so the narrow "1" doesn't shift columns — times line up across rows.
+- **Needs the GG engine running** (it hosts the GameSense server, address in
+  `%PROGRAMDATA%\SteelSeries\SteelSeries Engine 3\coreProps.json`). The GG *window* can be closed
+  to the tray. **GG not running (or a stale `coreProps.json` port) → `WinError 10061` /
+  connection refused** on `game_metadata` — just start SteelSeries GG. There is **no
+  SteelSeries-free path** short of reverse-engineering the OLED over USB HID (noted, not built).
+- No `config.py` — the server host is a CLI flag. Run:
+  `uv run python clients/apexpro/oled_client.py --railinfo-host 192.168.1.10:8088`. Not
+  autostarted (user's choice); a backgrounded run dies when the box sleeps.
+
 ## Gotchas
 
 - **The ESP repo `D:\Projects\ESP` is READ-ONLY** — copy out only, never modify. `depg0213.py`,
@@ -202,9 +234,25 @@ writes a prebuilt-image compose + LF-normalised `.env` and runs compose up. Rede
 
 ---
 
-## RESUME HERE — 2026-07-18
+## RESUME HERE — 2026-09-28
 
 **All four phases done and live** (NAS container on `192.168.1.10:8088`; Heltec polls it).
+Six clients now, the newest being the host-side Apex Pro OLED one.
+
+### Done this session (2026-09-28) — Apex Pro TKL OLED client (6th client)
+- **New host-side client `clients/apexpro/`** — streams the departures board to a SteelSeries
+  Apex Pro TKL 128×40 OLED via GameSense. See the "Apex Pro TKL OLED client" section above.
+  Bitmap renderer (`render.py`) reusing the Dot Matrix font + threshold; **4 rows, no scroll,
+  size 10, tabular digits** (ported from `pixoo.py`); top-row clip fixed (`_TOP=0`); dynamic
+  image bound with a 640-byte blank default (empty array → 500). `oled_client.py` discovers GG
+  via `coreProps.json`, registers, and pushes `image-data-128x40` each ~10 s.
+- **Verified live on the keyboard** (2026-09-18) against the NAS; previews eyeballed at 6×.
+  Committed + pushed to master this session.
+- **Not running / not autostarted (user's choice).** Needs the GG engine in the tray; with GG
+  off the client exits `WinError 10061` (seen when relaunching after the box had been off — the
+  fix is just to start SteelSeries GG, then rerun the command in the section above).
+- **Optional follow-ups, not done:** a direct-USB-HID (SteelSeries-free) path — a
+  reverse-engineering project, only scoped verbally; and autostart (Task Scheduler) if wanted.
 
 ### Done this session (2026-07-18, later) — NM-TV fourth client
 - **Ported the CYD client to an NMTech NM-TV-MINER v1.0** ("SmallTV" ESP32 lottery-miner desk
