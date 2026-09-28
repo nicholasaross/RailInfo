@@ -6,8 +6,9 @@ but with no Raspberry Pi hardware. It reads real-time data from the National Rai
 **LDBWS** REST API (via the Rail Data Marketplace) and renders it to the terminal, a
 [Divoom Pixoo 64](https://divoom.com/products/pixoo-64), a battery e-ink board (a
 Heltec Wireless Paper), a colour TFT (the CYD / ESP32-2432S028), a repurposed
-"SmallTV" desk cube (the NMTech NM-TV), or a Bitcoin "lottery-miner" gadget (the
-Luckyminer LV02) — the last four fed by a small JSON server.
+"SmallTV" desk cube (the NMTech NM-TV), a Bitcoin "lottery-miner" gadget (the
+Luckyminer LV02), or the OLED screen on a SteelSeries Apex Pro TKL keyboard — the
+last five fed by a small JSON server.
 
 <p align="center">
   <img src="railinfoclients/Pixoo.jpeg" height="235"
@@ -25,13 +26,19 @@ Luckyminer LV02) — the last four fed by a small JSON server.
   <img src="railinfoclients/LV02.jpeg" width="98%"
        alt="Luckyminer LV02 - a LilyGo T-Display-S3 clone - in landscape showing the Earlswood (Surrey) board: two Bedford departures at P1 09:10 and 10:10, a 09:04 clock, and a scrolling calling-at line (London Blackfriars, Farringdon, London...)">
 </p>
+<p align="center">
+  <img src="railinfoclients/ApexPro.jpeg" width="98%"
+       alt="SteelSeries Apex Pro TKL keyboard OLED showing the Earlswood board as four rows: Bedford departures at P1 13:12, 13:42, 14:12 and 14:42, destinations left and platform+time right in the dot-matrix font">
+</p>
 
-*The five clients live: the [Divoom Pixoo 64](#phase-2--pixoo-64-display-done) (top left), the
+*The six clients live: the [Divoom Pixoo 64](#phase-2--pixoo-64-display-done) (top left), the
 [CYD colour TFT](clients/cyd/README.md) (top middle, showing a cancellation in red), the
 [NM-TV cube](clients/nmtv/README.md) (top right — a repurposed ESP32 Bitcoin "lottery miner"
-desk gadget), the [Heltec Wireless Paper](clients/heltec/README.md) e-ink board (middle, showing
-a delayed service as `09:42 :45`), and the [Luckyminer LV02](clients/lv02/README.md) (bottom —
-another lottery-miner gadget, a LilyGo T-Display-S3 clone, in landscape).*
+desk gadget), the [Heltec Wireless Paper](clients/heltec/README.md) e-ink board (showing
+a delayed service as `09:42 :45`), the [Luckyminer LV02](clients/lv02/README.md) (another
+lottery-miner gadget, a LilyGo T-Display-S3 clone, in landscape), and the
+[SteelSeries Apex Pro TKL](clients/apexpro/README.md) keyboard OLED (bottom — four departure
+rows on the 128×40 mono screen, driven host-side via GameSense).*
 
 ## Phase 1 — LDBWS departure board (done)
 
@@ -117,7 +124,8 @@ scroll is deliberately paced. `--loop` re-fetches data every `--interval` second
 ## Phase 4 — JSON server + pull clients (done)
 
 A small stdlib HTTP server (`--serve`) exposes the board as JSON at `/board`, and one or more
-LAN display clients poll it over Wi-Fi and render a live board on-device:
+display clients poll it and render a live board — four on-device ESP32 displays, plus one
+host-side client driving a keyboard OLED:
 
 - [Heltec Wireless Paper](clients/heltec/README.md) — ESP32-S3 + 2.13" monochrome e-ink (MicroPython).
 - [CYD colour client](clients/cyd/README.md) — ESP32-2432S028 + 2.8" 320×240 ILI9341 colour TFT
@@ -131,6 +139,10 @@ LAN display clients poll it over Wi-Fi and render a live board on-device:
   gadget, a **LilyGo T-Display-S3 clone**: ESP32-S3 + 1.9" 170×320 ST7789 on an **8-bit parallel
   (i8080) bus**, not SPI). Same renderer, driven by a purpose-built parallel driver; view cycling
   by the BOOT button.
+- [Apex Pro TKL client](clients/apexpro/README.md) — a **SteelSeries Apex Pro TKL**'s 128×40
+  mono OLED, driven **host-side** (not an ESP32) via SteelSeries **GameSense**. It renders its
+  own 1-bit bitmap in the shared Dot Matrix font — four departure rows (destination left,
+  platform+time right) — and pushes it to the keyboard screen. Needs SteelSeries GG running.
 
 Three views, chosen with `?view=`:
 
@@ -198,6 +210,8 @@ renderer — terminal, Pixoo, and the e-ink client's JSON server — shares one 
 - `clients/nmtv/` — MicroPython client for the NMTech NM-TV cube (ESP32 + SPI ST7789).
 - `clients/lv02/` — MicroPython client for the Luckyminer LV02 (ESP32-S3 + **parallel** ST7789;
   its `lib/st7789.py` is a purpose-built i8080 driver that transposes 90° for landscape).
+- `clients/apexpro/` — **host-side** Python client for a SteelSeries Apex Pro TKL OLED via
+  GameSense; `render.py` draws the 1-bit 128×40 bitmap (shared Dot Matrix font + threshold).
 - `tests/` — pytest suite; `scripts/` — `preview_board.py` (offline PNG preview) and
   `deploy-to-nas.ps1` (build + ship the image to the NAS over SSH).
 

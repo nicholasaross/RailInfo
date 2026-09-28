@@ -5,6 +5,14 @@ A host-side pull client that streams the RailInfo board to a **SteelSeries Apex 
 the Windows box (the one with SteelSeries GG installed), not on-device — but it's the same
 idea: poll the JSON server's `/board` and render a live board.
 
+<p align="center">
+  <img src="../../railinfoclients/ApexPro.jpeg" width="98%"
+       alt="SteelSeries Apex Pro TKL keyboard OLED showing the Earlswood board as four rows: Bedford departures at P1 13:12, 13:42, 14:12 and 14:42, destinations left and platform+time right in the dot-matrix font">
+</p>
+
+*Live on the keyboard: four Bedford departures (P1 13:12 / 13:42 / 14:12 / 14:42), destinations
+left and platform+time right, in the shared Dot Matrix font with tabular-aligned times.*
+
 Targets the "Legacy" Apex Pro TKL (2020 / 2023 refresh, firmware `4.16.x`), whose OLED is the
 `screened-128x40` GameSense device. The Apex Pro TKL **Gen 3**'s larger colour screen is a
 different device type and is not handled here.
