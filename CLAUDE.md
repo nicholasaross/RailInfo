@@ -176,6 +176,12 @@ screen is a different device type and is not handled.
   to the tray. **GG not running (or a stale `coreProps.json` port) → `WinError 10061` /
   connection refused** on `game_metadata` — just start SteelSeries GG. There is **no
   SteelSeries-free path** short of reverse-engineering the OLED over USB HID (noted, not built).
+- **Self-healing (like the Pixoo runner).** GG **rewrites its GameSense port in `coreProps.json`
+  while it starts up**, so a client launched too early registers on one port then gets
+  connection-refused on the first push. The client therefore connects **lazily** (`GameSense.
+  ensure`, re-reading the address) and **drops + reconnects** on any transport error, so a GG
+  start/restart/port-change just blips the screen instead of killing the client. It never exits
+  because GG was briefly away; it logs connect/outage transitions once and backs off ~3 s.
 - No `config.py` — the server host is a CLI flag. Run:
   `uv run python clients/apexpro/oled_client.py --railinfo-host 192.168.1.10:8088`. Not
   autostarted (user's choice); a backgrounded run dies when the box sleeps.
@@ -248,9 +254,12 @@ Six clients now, the newest being the host-side Apex Pro OLED one.
   via `coreProps.json`, registers, and pushes `image-data-128x40` each ~10 s.
 - **Verified live on the keyboard** (2026-09-18) against the NAS; previews eyeballed at 6×.
   Committed + pushed to master this session.
-- **Not running / not autostarted (user's choice).** Needs the GG engine in the tray; with GG
-  off the client exits `WinError 10061` (seen when relaunching after the box had been off — the
-  fix is just to start SteelSeries GG, then rerun the command in the section above).
+- **Auto-reconnect added** after a GG-startup race bit the relaunch: GG rebinds its GameSense
+  port during startup, so the client now connects lazily and reconnects on any transport error
+  (re-reading `coreProps.json`), instead of dying on the first push to a stale port.
+- **Not autostarted (user's choice).** Needs the GG engine in the tray; if GG is fully off when
+  the loop starts it just retries every ~3 s until GG appears (no longer a hard exit). A
+  backgrounded run still dies when the box sleeps.
 - **Optional follow-ups, not done:** a direct-USB-HID (SteelSeries-free) path — a
   reverse-engineering project, only scoped verbally; and autostart (Task Scheduler) if wanted.
 

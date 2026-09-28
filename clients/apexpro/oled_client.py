@@ -77,24 +77,61 @@ def gamesense_base_url() -> str:
 
 
 class GameSense:
-    """Thin GameSense client: register the app, bind the screen handler, push frames."""
+    """GameSense client that discovers the server lazily and reconnects on connection loss.
 
-    def __init__(self, base_url: str, *, timeout: float = 5.0) -> None:
-        self._http = httpx.Client(base_url=base_url, timeout=timeout)
+    SteelSeries GG rewrites its GameSense port in ``coreProps.json`` while it starts up (and on
+    restarts), so a long-lived client can't cache one address: a push to a stale port fails with
+    connection-refused. So this connects lazily via :meth:`ensure` — (re)reading the address and
+    re-registering — and :meth:`show` marks the connection dropped on any transport error, so the
+    run loop just re-ensures and carries on. Mirrors the Pixoo runner's connect-factory pattern
+    (see CLAUDE.md: the loop owns the device lifecycle and never dies because the device did).
+    """
+
+    def __init__(self, *, bitmap: bool, timeout: float = 5.0) -> None:
+        self._bitmap = bitmap
+        self._timeout = timeout
+        self._http: httpx.Client | None = None
+
+    @property
+    def connected(self) -> bool:
+        return self._http is not None
+
+    def ensure(self) -> None:
+        """Connect (read the current address) and register+bind, if not already connected.
+
+        Raises :class:`GameSenseError` if GG is unreachable so the caller can back off and retry.
+        """
+        if self._http is not None:
+            return
+        self._http = httpx.Client(base_url=gamesense_base_url(), timeout=self._timeout)
+        try:
+            self._register()
+        except GameSenseError:
+            self.drop()  # a failed register leaves no usable connection; force a clean retry
+            raise
+
+    def drop(self) -> None:
+        """Tear down the current connection so the next :meth:`ensure` reconnects fresh."""
+        if self._http is not None:
+            self._http.close()
+            self._http = None
 
     def _post(self, path: str, payload: dict) -> None:
+        if self._http is None:
+            raise GameSenseError("not connected")
         try:
             self._http.post(path, json=payload).raise_for_status()
         except httpx.HTTPError as exc:
             raise GameSenseError(f"GameSense {path} failed: {exc}") from exc
 
-    def register(self, *, bitmap: bool, line_count: int = 3) -> None:
-        """Register the app and bind the screen handler.
+    def _register(self, *, line_count: int = 3) -> None:
+        """Register the app and bind the screen handler for the configured mode.
 
-        ``bitmap`` binds a full-screen image handler (``has-text: false``) we feed a fresh
+        Bitmap mode binds a full-screen image handler (``has-text: false``) we feed a fresh
         128×40 bitmap each frame via the ``image-data-128x40`` context-frame key; otherwise it
         binds GameSense's built-in multi-line text handler (which only fits ~2 lines here).
         """
+        bitmap = self._bitmap
         self._post(
             "/game_metadata",
             {
@@ -136,18 +173,28 @@ class GameSense:
         )
 
     def show(self, frame: dict) -> None:
-        """Push one screen frame (text keys, or the image-data array) and reset the GG timer."""
-        self._post("/game_event", {"game": GAME, "event": EVENT, "data": {"frame": frame}})
+        """Push one screen frame (text keys, or the image-data array) and reset the GG timer.
+
+        On any transport error the connection is dropped so the next :meth:`ensure` reconnects
+        (picking up a fresh port if GG moved it); the error is re-raised for the caller to log.
+        """
+        try:
+            self._post("/game_event", {"game": GAME, "event": EVENT, "data": {"frame": frame}})
+        except GameSenseError:
+            self.drop()
+            raise
 
     def remove(self) -> None:
-        """Deregister the app so GG hands the screen back to its normal content."""
+        """Deregister the app so GG hands the screen back to its normal content (best-effort)."""
+        if self._http is None:
+            return
         try:
             self._post("/remove_game", {"game": GAME})
         except GameSenseError:
             pass  # best-effort on shutdown
 
     def close(self) -> None:
-        self._http.close()
+        self.drop()
 
 
 # --- Board formatting -------------------------------------------------------------------
@@ -233,24 +280,46 @@ class RailInfo:
 
 # --- Main loop --------------------------------------------------------------------------
 
+_RETRY_BACKOFF = 3.0   # seconds to wait after a GameSense outage before retrying
+_ONCE_MAX_TRIES = 5    # give up --once after this many connect attempts
+
+
 def run(args: argparse.Namespace) -> int:
     bitmap = not args.text
-    railinfo = RailInfo(base_url=_normalise(args.railinfo_host), view=args.view)
-    gs = GameSense(gamesense_base_url())
-    gs.register(bitmap=bitmap)
     mode = "bitmap" if bitmap else "text"
-    print(f"Registered '{GAME}' with GameSense ({mode} mode); streaming RailInfo -> Apex Pro OLED.")
+    railinfo = RailInfo(base_url=_normalise(args.railinfo_host), view=args.view)
+    gs = GameSense(bitmap=bitmap)
 
     board: dict | None = None
     last_fetch = 0.0
     step = 0
+    was_connected = False   # so we log connect/outage transitions once, not every frame
+    tries = 0
     try:
         while True:
             now = time.monotonic()
             if board is None or now - last_fetch >= args.data_interval:
                 board = railinfo.board()
                 last_fetch = now
-            gs.show(_frame(board, step, args, bitmap))
+            try:
+                gs.ensure()
+                gs.show(_frame(board, step, args, bitmap))
+                tries = 0
+                if not was_connected:
+                    print(f"Registered '{GAME}' with GameSense ({mode} mode); "
+                          "streaming RailInfo -> Apex Pro OLED.")
+                    was_connected = True
+            except GameSenseError as exc:
+                tries += 1
+                if was_connected or tries == 1:
+                    print(f"GameSense unavailable ({exc}); retrying every "
+                          f"{_RETRY_BACKOFF:g}s (is SteelSeries GG running?).")
+                was_connected = False
+                if args.once and tries >= _ONCE_MAX_TRIES:
+                    print("error: gave up after repeated GameSense failures.")
+                    return 1
+                time.sleep(_RETRY_BACKOFF)
+                continue
             if args.once:
                 return 0
             step += 1
