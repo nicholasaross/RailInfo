@@ -11,6 +11,8 @@ colour dot-matrix look — amber = on time, orange = delayed (`HH:MM :MM`), red 
 with per-region change detection (no flicker) and a scrolling "Calling:" footer. A **touch on
 the pad** (or BOOT, if your unit has the button populated) cycles
 `departures → all departures → arrivals`.
+While the server reports the board **`stale`** (fetching fresh data after a wait), a small
+hourglass shows next to the clock and the footer holds static; both clear when live data lands.
 
 ## Hardware notes (v1.0 board — differs from NMTech's published pinout!)
 

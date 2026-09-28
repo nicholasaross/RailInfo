@@ -169,6 +169,45 @@ def test_cache_views_are_independent():
     assert data["services"][0]["destination"] == "London Bridge"  # origin shown as the label
 
 
+def test_cache_warms_all_views_on_wake():
+    # After an idle gap the next request must warm ALL views (not just the requested one), so
+    # cycling between screens right after a wake finds them fresh instead of each stale in turn.
+    svc = _FakeService()
+    cache = BoardCache(svc, ttl=999, wake_after=0.05)
+    _ready(cache, "departures")  # first connect is NOT a wake: only departures fetched
+    assert (svc.dep_calls, svc.arr_calls) == (1, 0)
+    time.sleep(0.06)  # idle past wake_after -> the next request is a "wake"
+    cache.get_board("departures")  # departures stays fresh (ttl 999); 'all' + 'arrivals' warm
+    _ready(cache, "all")
+    _ready(cache, "arrivals")
+    assert svc.dep_calls == 2 and svc.arr_calls == 1  # 'all' = a departure fetch; 'arrivals' too
+
+
+def test_cache_does_not_warm_others_without_idle_gap():
+    # Continuous polling of one view (no idle gap) must not warm the others -- warming is bounded
+    # to wake events, so a live display doesn't triple the upstream API usage.
+    svc = _FakeService()
+    cache = BoardCache(svc, ttl=999, wake_after=10)
+    _ready(cache, "departures")
+    for _ in range(3):
+        cache.get_board("departures")  # rapid polls, well within wake_after
+    time.sleep(0.02)
+    assert svc.dep_calls == 1 and svc.arr_calls == 0  # only departures ever fetched
+
+
+def test_is_stale_and_projection_reflect_age():
+    svc = _FakeService()
+    cache = BoardCache(svc, ttl=999, stale_after=0.05)
+    board = _ready(cache, "departures")
+    assert cache.is_stale("departures") is False  # just fetched -> fresh
+    with cache._lock:  # age the cached entry past stale_after
+        cached_board, _ = cache._cache["departures"]
+        cache._cache["departures"] = (cached_board, time.time() - 1.0)
+    assert cache.is_stale("departures") is True
+    assert json.loads(_project("departures", board, stale=True))["stale"] is True
+    assert json.loads(_project("departures", board, stale=False))["stale"] is False
+
+
 def _serve(cache):
     httpd = make_server(cache, host="127.0.0.1", port=0)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()

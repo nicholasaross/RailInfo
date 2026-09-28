@@ -107,16 +107,35 @@ def _disp_time(svc):
     return sched
 
 
+def _hourglass(fb, x, y, size, colour):
+    """Draw an hourglass (two bars + a crossed X) - the refreshing glyph. colour=0 is ink here."""
+    s = size - 1
+    fb.hline(x, y, size, colour)
+    fb.hline(x, y + s, size, colour)
+    fb.line(x, y, x + s, y + s, colour)
+    fb.line(x + s, y, x, y + s, colour)
+
+
 def _header(display, wri, data):
     """Draw station (left) + clock (right), pixel-aligned for the proportional font."""
     gen = data.get("generated_at") or ""
     clock = gen.split("T")[1][:5] if "T" in gen else ""
     clock_w = wri.stringlen(clock) if clock else 0
+    # A small "refreshing" hourglass left of the clock while the server fetches fresh data
+    # (data["stale"]). E-ink only redraws when the framebuffer changes, and stale flips only on
+    # genuine wakes (not routine revalidation), so this costs ~1 extra full refresh per wake.
+    # Sized/centred to the baseline band (digits sit above the baseline) so it lines up with time.
+    base = wri.font.baseline()
+    ih = base - 2
+    iy = (base - ih) // 2
+    icon_w = (ih + 3) if data.get("stale") else 0
     station = _fit_px(wri, data.get("station") or data.get("crs") or "RailInfo",
-                      display.width - clock_w - 4)
+                      display.width - clock_w - 4 - icon_w)
     _draw(wri, 0, HEADER_Y, station)
     if clock:
         _draw(wri, display.width - clock_w, HEADER_Y, clock)
+    if icon_w:
+        _hourglass(display, display.width - clock_w - 3 - ih, HEADER_Y + iy, ih, 0)
 
 
 def _draw_row(wri, display, y, svc):

@@ -27,6 +27,9 @@ It's a **hybrid** of the other two clients:
 4. Keeps showing the last good board if a fetch fails; reconnects WiFi if it drops.
 5. While the (lazy) server warms up its first fetch it replies `{"status": "starting"}`; the
    client shows a brief **"Starting up…"** screen until the real board lands.
+6. While the server reports the board **`stale`** (fetching fresh data after a wait), a small
+   hourglass shows next to the clock and the calling-at footer holds static; both clear when live
+   data lands.
 
 ### Rendering (why it's strip-based)
 

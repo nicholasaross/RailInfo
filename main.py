@@ -110,6 +110,17 @@ def main() -> int:
         "--host", default="0.0.0.0", help="Server bind address (with --serve)."
     )
     server.add_argument("--port", type=int, default=8000, help="Server port (with --serve).")
+    server.add_argument(
+        "--stale-after", type=float, default=90.0,
+        help="Seconds after which a served board is reported 'stale' so clients show a "
+        "'refreshing' indicator (default: 90; keep > --interval so routine revalidation "
+        "doesn't flag it).",
+    )
+    server.add_argument(
+        "--wake-after", type=float, default=45.0,
+        help="Idle-gap seconds after which the next request 'wakes' the cache and warms ALL "
+        "views (not just the requested one), so cycling screens after idle is fresh (default: 45).",
+    )
     args = parser.parse_args()
 
     try:
@@ -224,6 +235,8 @@ def _run_server(args, service: BoardService, direction: dict[str, object]) -> in
         interval=args.interval,
         crs=args.crs,
         board_kwargs=direction,
+        stale_after=args.stale_after,
+        wake_after=args.wake_after,
     )
     return 0
 
@@ -240,7 +253,10 @@ def _run_combined(
     so an absent Pixoo can no longer take the server (and the Heltec) down with it.
     """
     _configure_logging(quiet_httpx=True)
-    cache = BoardCache(service, crs=args.crs, board_kwargs=direction, ttl=args.interval)
+    cache = BoardCache(
+        service, crs=args.crs, board_kwargs=direction, ttl=args.interval,
+        stale_after=args.stale_after, wake_after=args.wake_after,
+    )
     httpd = make_server(cache, host=args.host, port=args.port)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     print(

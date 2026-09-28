@@ -10,6 +10,8 @@ NM-TV's `railinfo_client.py` unchanged): it polls the RailInfo JSON server (`/bo
 every ~5s and renders the board in the Pixoo's colour dot-matrix look — amber = on time, orange =
 delayed (`HH:MM :MM`), red = `cancelled` — with per-region change detection and a scrolling
 "Calling:" footer. The **BOOT button (GPIO0)** cycles `departures → all departures → arrivals`.
+While the server reports the board **`stale`** (fetching fresh data after a wait), a small
+hourglass shows next to the clock and the footer holds static; both clear when live data lands.
 
 ## Hardware notes
 

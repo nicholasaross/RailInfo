@@ -79,11 +79,17 @@ def to_client_dict(
     *,
     arrivals: bool = False,
     with_calling: bool = False,
+    stale: bool = False,
 ) -> dict:
-    """Project a :class:`DepartureBoard` into the compact JSON a display client needs."""
+    """Project a :class:`DepartureBoard` into the compact JSON a display client needs.
+
+    ``stale`` tells the client the board it's getting is older than ``stale_after`` and a fresh
+    lookup is under way, so it can overlay a "refreshing" indicator on the cached view.
+    """
     services = board.services[:limit]
     out = {
         "status": "ready",
+        "stale": stale,
         "station": board.location_name,
         "crs": board.crs,
         "generated_at": board.generated_at,
@@ -99,14 +105,14 @@ def to_client_dict(
     return out
 
 
-def _project(view: str, board: DepartureBoard) -> bytes:
+def _project(view: str, board: DepartureBoard, *, stale: bool = False) -> bytes:
     """Render the JSON body for ``view`` from a cached domain board."""
     if view == "arrivals":
-        payload = to_client_dict(board, PORTRAIT_LIMIT, arrivals=True)
+        payload = to_client_dict(board, PORTRAIT_LIMIT, arrivals=True, stale=stale)
     elif view == "all":
-        payload = to_client_dict(board, PORTRAIT_LIMIT)
+        payload = to_client_dict(board, PORTRAIT_LIMIT, stale=stale)
     else:  # departures: the filtered, with-calling landscape board
-        payload = to_client_dict(board, LANDSCAPE_LIMIT, with_calling=True)
+        payload = to_client_dict(board, LANDSCAPE_LIMIT, with_calling=True, stale=stale)
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
 
@@ -128,11 +134,21 @@ class BoardCache:
         crs: str | None = None,
         board_kwargs: dict | None = None,
         ttl: float = 30.0,
+        stale_after: float = 90.0,
+        wake_after: float = 45.0,
     ) -> None:
         self._service = service
         self._crs = crs
         self._bk = board_kwargs or {}
         self._ttl = ttl
+        # A board older than this is reported ``stale`` so clients can show a "refreshing"
+        # indicator. Deliberately > ttl so routine revalidation doesn't flag it (which would,
+        # e.g., make the e-ink Heltec full-refresh every poll) — only a genuine idle/outage does.
+        self._stale_after = stale_after
+        # When a request arrives after a gap this long (all displays had been quiet), treat it as
+        # a "wake" and warm *all* views, so cycling between screens right after waking is fresh.
+        self._wake_after = wake_after
+        self._last_seen = 0.0  # monotonic time of the last request (for wake detection)
         self._lock = threading.Lock()
         self._cache: dict[str, tuple[DepartureBoard, float]] = {}
         self._inflight: set[str] = set()  # views with a fetch running (refresh coalescing)
@@ -140,6 +156,7 @@ class BoardCache:
         self.starting = json.dumps(
             {
                 "status": "starting",
+                "stale": False,
                 "station": None,
                 "crs": self._crs,
                 "generated_at": None,
@@ -162,21 +179,50 @@ class BoardCache:
         """Current board for ``view`` (possibly slightly stale), or None if none fetched yet.
 
         Never blocks: when the entry is missing or past its TTL, a single background refresh is
-        launched (coalesced) and the existing board — if any — is returned meanwhile.
+        launched (coalesced) and the existing board — if any — is returned meanwhile. On a
+        **wake** (the first request after an idle gap > ``wake_after``) the *other* views are
+        warmed too, so cycling between screens right after waking finds them fresh, not each
+        stale in turn.
+        """
+        if view not in VIEWS:
+            view = "departures"
+        with self._lock:
+            now_mono = time.monotonic()
+            waking = self._started and (now_mono - self._last_seen) > self._wake_after
+            self._last_seen = now_mono
+            self._ensure_refresh_locked(view)  # the requested view: normal lazy/stale check
+            if waking:
+                for other in VIEWS:
+                    if other != view:
+                        self._ensure_refresh_locked(other)
+            entry = self._cache.get(view)
+            return entry[0] if entry else None
+
+    def _ensure_refresh_locked(self, view: str) -> None:
+        """Launch a coalesced background refresh for ``view`` if it's stale/missing and idle.
+
+        Caller must hold ``self._lock``. Mirrors the original single-view logic (including the
+        first-connect flag) so both the requested view and wake-warmed views share one path.
+        """
+        entry = self._cache.get(view)
+        stale = entry is None or (time.time() - entry[1]) >= self._ttl
+        if stale and view not in self._inflight:
+            self._inflight.add(view)
+            first = not self._started
+            self._started = True
+            threading.Thread(target=self._refresh, args=(view, first), daemon=True).start()
+
+    def is_stale(self, view: str) -> bool:
+        """True when the served board for ``view`` is older than ``stale_after``.
+
+        Signals "you're seeing cached data while a fresh lookup runs" so a client can show a
+        refreshing indicator. False when cold (no board yet) — that's ``starting``, not stale.
         """
         if view not in VIEWS:
             view = "departures"
         with self._lock:
             entry = self._cache.get(view)
-            stale = entry is None or (time.time() - entry[1]) >= self._ttl
-            if stale and view not in self._inflight:
-                self._inflight.add(view)
-                first = not self._started
-                self._started = True
-                threading.Thread(
-                    target=self._refresh, args=(view, first), daemon=True
-                ).start()
-            return entry[0] if entry else None
+            return entry is not None and (time.time() - entry[1]) > self._stale_after
 
     def _refresh(self, view: str, first: bool) -> None:
         """Fetch ``view`` off the request/render thread; keep the last board on failure."""
@@ -218,7 +264,10 @@ def _make_handler(cache: BoardCache) -> type[BaseHTTPRequestHandler]:
                 board = cache.get_board(view)
                 # Always 200: a cold view yields a "starting" board (never a 503), so the
                 # simple poll-and-render clients don't have to treat startup as an error.
-                self._send(200, _project(view, board) if board is not None else cache.starting)
+                if board is None:
+                    self._send(200, cache.starting)
+                else:
+                    self._send(200, _project(view, board, stale=cache.is_stale(view)))
             elif path == "/healthz":
                 self._send(200, json.dumps({"ok": True, "views": list(VIEWS)}).encode("utf-8"))
             else:
@@ -251,13 +300,18 @@ def serve(
     interval: float = 30.0,
     crs: str | None = None,
     board_kwargs: dict | None = None,
+    stale_after: float = 90.0,
+    wake_after: float = 45.0,
 ) -> None:
     """Run the JSON board server (server-only) until interrupted (Ctrl+C) or SIGTERM.
 
     Returns straight away with an empty cache: no LDBWS call is made until the first client
     connects (see :class:`BoardCache`), so the server can sit idle without burning API quota.
     """
-    cache = BoardCache(service, crs=crs, board_kwargs=board_kwargs, ttl=interval)
+    cache = BoardCache(
+        service, crs=crs, board_kwargs=board_kwargs, ttl=interval,
+        stale_after=stale_after, wake_after=wake_after,
+    )
     httpd = make_server(cache, host=host, port=port)
 
     def _shutdown(signum: int, _frame: object) -> None:

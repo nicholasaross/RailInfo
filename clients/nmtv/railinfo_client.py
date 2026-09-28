@@ -189,6 +189,7 @@ class Board:
         self._scroll = 0         # current horizontal scroll offset (px)
         self._scroll_start = 0   # ticks_ms when the current footer was built (for the start pause)
         self._foot_total = 0     # width of the footer text in foot_wide incl. wrap gap (0 = none)
+        self._stale = False      # is the shown board stale? (pause the footer scroll until live)
 
     @staticmethod
     def _mk(strip, font):
@@ -312,7 +313,10 @@ class Board:
 
     def tick_scroll(self):
         """Advance + redraw the footer one scroll step, after an initial hold so the start of the
-        list is readable. No-op unless the footer is scrolling and the start pause has elapsed."""
+        list is readable. No-op while the board is stale (wait for live data before scrolling), or
+        unless the footer is scrolling and the start pause has elapsed."""
+        if self._stale:
+            return  # don't scroll cached data - hold at the start until a live board lands
         if self._scrolling and time.ticks_diff(time.ticks_ms(), self._scroll_start) >= FOOT_SCROLL_DELAY_MS:
             self._scroll += FOOT_SCROLL_STEP
             if self._scroll >= self._foot_total:        # keep it bounded (no unbounded bignum)
@@ -328,10 +332,30 @@ class Board:
         gen = data.get("generated_at") or ""
         clock = gen.split("T")[1][:5] if "T" in gen else ""
         cw = wri.stringlen(clock) if clock else 0
+        # A small "refreshing" hourglass appears left of the clock while the server is fetching
+        # fresh data (data["stale"]). Sized to the font and centred on the clock digits (drawn at
+        # y=0, height fh) so it lines up with the time. It changes the header strip's bytes, so the
+        # per-region change detection re-blits the header only when it toggles - not on every poll.
+        self._stale = bool(data.get("stale"))
+        base = wri.font.baseline()  # digits sit in [~0, baseline); align the icon to that band,
+        ih = base - 2               # not the full cell height (which has empty descender space)
+        iy = (base - ih) // 2
+        icon_w = (ih + 4) if self._stale else 0
         head = title or data.get("station") or data.get("crs") or "RailInfo"
-        _draw(wri, 0, 0, _fit_px(wri, head, strip.width - cw - 6))
+        _draw(wri, 0, 0, _fit_px(wri, head, strip.width - cw - 6 - icon_w))
         if clock:
             _draw(wri, strip.width - cw, 0, clock)
+        if self._stale:
+            self._hourglass(strip, strip.width - cw - 4 - ih, iy, ih)
+
+    @staticmethod
+    def _hourglass(strip, x, y, size):
+        """Draw an hourglass (two bars + a crossed X) into a 1-bpp strip - the refreshing glyph."""
+        s = size - 1
+        strip.hline(x, y, size, 1)
+        strip.hline(x, y + s, size, 1)
+        strip.line(x, y, x + s, y + s, 1)
+        strip.line(x + s, y, x, y + s, 1)
 
     def _row(self, strip, wri, svc):
         """Draw one departure/arrival row into a (pre-cleared) strip: label left, block right.

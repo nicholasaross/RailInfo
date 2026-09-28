@@ -33,6 +33,12 @@ Data acquisition is decoupled from presentation behind `railinfo/domain` + `rail
   **stale-while-revalidate** with coalesced refresh (one fetch in flight per view). `_project`
   renders each view's JSON; `make_server` builds the server headless so it can share a process
   + cache with the Pixoo loop (`--serve --pixoo --loop`) — one LDBWS fetch feeds both displays.
+  **Two extra signals (added 2026-09-28):** each payload carries **`stale`** (board older than
+  `--stale-after`, default 90s — set > TTL so routine 30s revalidation doesn't trip it) so clients
+  can show a "refreshing" indicator; and **warm-on-wake** — a request after an idle gap
+  > `--wake-after` (default 45s) warms **all** views (not just the requested one), so cycling
+  screens right after a wake is fresh. Bounded to wake events (departures ≈7 API calls). See
+  `is_stale`/`_ensure_refresh_locked` in `BoardCache`.
 - `clients/heltec/` — **Phase 4 MicroPython client** for the Heltec Wireless Paper V1.2.
 
 ## Heltec client (`clients/heltec/`)
@@ -244,6 +250,26 @@ writes a prebuilt-image compose + LF-normalised `.env` and runs compose up. Rede
 
 **All four phases done and live** (NAS container on `192.168.1.10:8088`; Heltec polls it).
 Six clients now, the newest being the host-side Apex Pro OLED one.
+
+### Done this session (2026-09-28, later) — refreshing indicator + warm-on-wake
+- **Server:** `BoardCache` now warms **all** views on a wake (idle gap > `--wake-after`, default
+  45s) and reports **`stale`** in the JSON (age > `--stale-after`, default 90s). New flags on
+  `main.py --serve`. Tests added (`test_server.py`, 53 pass).
+- **All clients show a small "refreshing" hourglass** left of the clock (Apex Pro: top-right, times
+  shift left) while `data["stale"]`; the three scrolling clients (LV02/CYD/NM-TV) also **pause the
+  calling-at footer scroll until live** (`tick_scroll` no-ops when `self._stale`).
+- **Alignment gotcha:** align the icon to the font's **`baseline()`**, NOT `height()` — dot-matrix
+  fonts have empty descender space (dotmatrix19: baseline 14, height 18), so a height-sized icon
+  hangs below the digits. Verified on the **Apex Pro** and the **LV02** (user-confirmed aligned).
+- **LV02 flashed** with the updated client (main.py) via `mpremote cp` + power-cycle (the `run`
+  follow-stream kept dropping with `ClearCommError` — the documented USB-JTAG flakiness). CYD/NM-TV
+  edited to the same pattern but **not flashed** (not plugged in); Heltec edited, not flashed.
+- **PENDING — deploy the updated server to the NAS** (`scripts/deploy-to-nas.ps1 -NasHost
+  192.168.1.10 -NasUser <admin> -Start -HostPort 8088`) to make `stale`/warm-on-wake live. Until
+  then the new clients poll the old server and simply see no `stale` field (backward compatible —
+  no icon, no warm-on-wake). Client + server code committed.
+- **Reminder learned:** never infer which device is on a COM port — ports are reused; confirm by
+  probing / ask the user (the plugged-in board this session was the LV02, on COM3).
 
 ### Done this session (2026-09-28) — Apex Pro TKL OLED client (6th client)
 - **New host-side client `clients/apexpro/`** — streams the departures board to a SteelSeries

@@ -336,7 +336,8 @@ def _frame(board: dict | None, step: int, args: argparse.Namespace, bitmap: bool
     """Build one screen frame for the current step (image bytes, or text keys)."""
     if bitmap:
         payload = board if board is not None else {"status": "starting"}
-        return {IMAGE_KEY: render.frame_bytes(payload, rows=args.rows)}
+        return {IMAGE_KEY: render.frame_bytes(payload, rows=args.rows,
+                                              stale=bool(payload.get("stale")))}
     if board is None:
         return {"l0": "RailInfo", "l1": "no data", "l2": ""}
     return build_frame(board, width=args.line_chars, marquee_offset=step)

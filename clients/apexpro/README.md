@@ -30,6 +30,10 @@ Calling at: London Bl…   <- scrolling marquee of the calling-at line
 Same status notation as the Pixoo/e-ink boards: on-time shows nothing extra, a delay shows the
 revised `HH:MM`, a cancellation shows `CANC` (destination is truncated before the time/status is).
 
+When the server reports the board is **stale** (fetching fresh data after a wait), a small
+hourglass appears top-right and the time columns shift left to make room; it clears once live data
+lands.
+
 ## Prerequisites
 
 1. **SteelSeries GG** installed and running (it hosts the local GameSense server this client

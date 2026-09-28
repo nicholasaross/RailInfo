@@ -157,6 +157,13 @@ that view in the background; once it lands, later polls get the real board (`"st
 default 30s), keeping the last good board if a refresh fails. So the server sits idle — and
 makes no API calls — whenever nothing is displaying it.
 
+Two conveniences smooth the "just woke it up" experience. The board carries a **`stale`** flag
+(older than `--stale-after`, default 90s) so clients can show a small **"refreshing" indicator**
+while a fresh lookup runs, instead of passing stale data off as live. And a request arriving
+after an idle gap (> `--wake-after`, default 45s) **warms all three views at once**, so cycling
+between screens right after a wake is fresh rather than each view refreshing in turn. The
+clients that scroll a calling-at footer also **hold it static until the data is live**.
+
 ### Run everything
 
 One process serves the pull clients' JSON API **and** streams to the Pixoo, sharing a single

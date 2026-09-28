@@ -45,6 +45,20 @@ _TOP = 0              # row 1 baseline; 0 keeps the caps' top pixel row on-panel
 _MARGIN = 1           # keep ink off the extreme edge columns
 _GAP = 3              # min gap between a row's left text and its right-hand block
 
+# A small "refreshing" hourglass drawn top-right when the board is stale (server is looking up
+# fresh data). When shown, the time columns shift left by _ICON_W so nothing overlaps it — every
+# row shifts equally, so the tabular alignment is preserved.
+_ICON = (
+    "1111111",
+    "0111110",
+    "0011100",
+    "0001000",
+    "0011100",
+    "0111110",
+    "1111111",
+)
+_ICON_W = len(_ICON[0]) + 1  # glyph width + a 1px gap reserved on the right when stale
+
 # Shorten long tokens so a truncated destination still reads (order matters).
 _ABBREVIATIONS = {
     " International": " Intl",
@@ -126,22 +140,36 @@ def _fit(font: ImageFont.FreeTypeFont, text: str, max_width: int) -> str:
     return word
 
 
-def _draw_row(draw: ImageDraw.ImageDraw, svc: dict, y: int) -> None:
-    """Destination on the left, platform+time hard against the right edge."""
+def _draw_row(draw: ImageDraw.ImageDraw, svc: dict, y: int, right_x: int) -> None:
+    """Destination on the left, platform+time right-aligned to ``right_x``."""
     font = _font(_ROW_FONT)
     right = _right_block(svc)
     right_w = _tabular_width(font, right)
-    _draw_tabular(draw, right, WIDTH - _MARGIN, y, font)
+    _draw_tabular(draw, right, right_x, y, font)
 
     dest = _abbreviate(svc.get("destination") or "?")
-    dest = _fit(font, dest, WIDTH - _MARGIN - right_w - _GAP - _MARGIN)
+    dest = _fit(font, dest, right_x - right_w - _GAP - _MARGIN)
     draw.text((_MARGIN, y), dest, font=font, fill=255)
 
 
-def render_image(board: dict, *, rows: int = _MAX_ROWS) -> Image.Image:
-    """Render the board to a 1-bit (mode ``"1"``) 128×40 image with up to ``rows`` services."""
+def _draw_icon(image: Image.Image, x: int, y: int) -> None:
+    """Plot the refreshing hourglass (lit pixels) into a mode-``L`` image at (x, y)."""
+    px = image.load()
+    for dy, row in enumerate(_ICON):
+        for dx, ch in enumerate(row):
+            if ch == "1":
+                px[x + dx, y + dy] = 255
+
+
+def render_image(board: dict, *, rows: int = _MAX_ROWS, stale: bool = False) -> Image.Image:
+    """Render the board to a 1-bit (mode ``"1"``) 128×40 image with up to ``rows`` services.
+
+    ``stale`` draws a small refreshing hourglass top-right (the server is fetching fresh data);
+    the time columns shift left to make room, so nothing overlaps it.
+    """
     image = Image.new("L", (WIDTH, HEIGHT), 0)
     draw = ImageDraw.Draw(image)
+    right_x = WIDTH - _MARGIN - (_ICON_W if stale else 0)
 
     if board.get("status") == "starting":
         draw.text((_MARGIN, _TOP), f"{board.get('crs') or ''} starting...".strip(),
@@ -151,9 +179,12 @@ def render_image(board: dict, *, rows: int = _MAX_ROWS) -> Image.Image:
         if not services:
             draw.text((_MARGIN, _TOP), "No departures", font=_font(_ROW_FONT), fill=255)
         for i, svc in enumerate(services[:rows]):
-            _draw_row(draw, svc, _TOP + i * _ROW_PITCH)
+            _draw_row(draw, svc, _TOP + i * _ROW_PITCH, right_x)
 
-    return image.point(lambda p: 255 if p >= _THRESHOLD else 0).convert("1")
+    out = image.point(lambda p: 255 if p >= _THRESHOLD else 0)
+    if stale:  # onto the thresholded image so the crisp glyph isn't re-thresholded
+        _draw_icon(out, WIDTH - len(_ICON[0]), 0)
+    return out.convert("1")
 
 
 def pack_1bit(image: Image.Image) -> list[int]:
@@ -171,6 +202,6 @@ def pack_1bit(image: Image.Image) -> list[int]:
     return list(out)
 
 
-def frame_bytes(board: dict, *, rows: int = _MAX_ROWS) -> list[int]:
+def frame_bytes(board: dict, *, rows: int = _MAX_ROWS, stale: bool = False) -> list[int]:
     """Convenience: render ``board`` and return the 640-int image-data array."""
-    return pack_1bit(render_image(board, rows=rows))
+    return pack_1bit(render_image(board, rows=rows, stale=stale))
