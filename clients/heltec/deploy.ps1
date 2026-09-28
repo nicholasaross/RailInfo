@@ -21,7 +21,7 @@ Write-Output "Copying lib modules to ${Port}:/lib ..."
 mpremote connect $Port mkdir :lib 2>$null
 mpremote connect $Port cp `
     "$here\lib\depg0213.py" "$here\lib\writer.py" `
-    "$here\lib\dotmatrix10.py" "$here\lib\dotmatrix16.py" "$here\lib\dotmatrix20.py" :lib/
+    "$here\lib\dotmatrix9.py" "$here\lib\dotmatrix19.py" :lib/
 
 Write-Output "Copying app + config ..."
 mpremote connect $Port cp "$here\boards.py" "$here\config.py" "$here\railinfo_client.py" :
