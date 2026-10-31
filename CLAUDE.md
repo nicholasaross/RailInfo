@@ -288,10 +288,11 @@ direction).
   `to_split_dict` + `SPLIT_LIMIT = 8` (`server.py`). Northbound = the `DIRECTION_FILTER_CRS` "to"
   board; southbound = the same CRS "from". Verified live that RDH to + from is exactly the whole
   Earlswood board (4 + 4 = 8, no overlap). 7 new tests; suite **60 green**.
-- **NAS deploy pending** (needs the user's SSH/sudo). The CYD Portrait is already pointed at the
-  NAS (`config.py` → `192.168.1.10:8088`); until the new image is live it shows "Server needs the
-  split view", and it picks the board up on its own once the NAS serves `split`. See "Still
-  pending".
+- **Deployed to the NAS** (user ran `scripts/deploy-to-nas.ps1`; `/healthz` lists `split`). The
+  CYD Portrait (`config.py` → `192.168.1.10:8088`) picked the board up on its own and is **live in
+  its stand** — user-confirmed with a photo, now in the README gallery as
+  `railinfoclients/CYDPortrait.jpeg` (EXIF-stripped, long side 1600 px) alongside the Anycubic
+  Makeronline link to the stand. The code went in as `dda83c7` (pushed).
 
 ### Done this session (2026-09-28, later) — refreshing indicator + warm-on-wake
 - **Server:** `BoardCache` now warms **all** views on a wake (idle gap > `--wake-after`, default
@@ -504,11 +505,7 @@ from a single LDBWS fetch. (Split mode `--serve` + `--pixoo --loop` still works 
 departures fetch; dev-box processes die when the box sleeps — the NAS doesn't.)
 
 ### Still pending
-- **Deploy the `split` server to the NAS** (Docker Desktop on, then
-  `pwsh scripts/deploy-to-nas.ps1 -NasHost 192.168.1.10 -NasUser <admin> -Start -HostPort 8088`;
-  it rebuilds the image). The CYD Portrait is already configured for the NAS, so then just check
-  `curl http://192.168.1.10:8088/healthz` lists `split` and the panel shows the board.
-- Optional: a photo of the CYD Portrait in its stand for the README gallery.
+- _(none — all caught up.)_
 
 ### Decisions locked
 - Proportional fonts (NOT monospaced); 9 + 19 only; tabular/centred digits.

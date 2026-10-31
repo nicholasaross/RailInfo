@@ -20,6 +20,10 @@ last five fed by a small JSON server.
        alt="NM-TV SmallTV cube - a repurposed ESP32 lottery miner - showing the departure board in amber dot-matrix on its 1.54 inch screen">
 </p>
 <p align="center">
+  <img src="railinfoclients/CYDPortrait.jpeg" height="440"
+       alt="CYD Portrait - a CYD in a black 3D-printed portrait stand - showing the Earlswood (Surrey) board at 13:31: a Northbound half with four Peterborough departures on P1 (one delayed, 14:43 :45, in orange) and a Southbound half with five Horsham departures on P2 (the first two delayed, in orange)">
+</p>
+<p align="center">
   <img src="railinfoclients/Heltec.jpeg" width="98%"
        alt="Heltec Wireless Paper e-ink display showing the Earlswood (Surrey) departure board with a delayed first service">
 </p>
@@ -32,10 +36,14 @@ last five fed by a small JSON server.
        alt="SteelSeries Apex Pro TKL keyboard OLED showing the Earlswood board as four rows: Bedford departures at P1 13:12, 13:42, 14:12 and 14:42, destinations left and platform+time right in the dot-matrix font">
 </p>
 
-*The six clients live: the [Divoom Pixoo 64](#phase-2--pixoo-64-display-done) (top left), the
+*The seven clients live: the [Divoom Pixoo 64](#phase-2--pixoo-64-display-done) (top left), the
 [CYD colour TFT](clients/cyd/README.md) (top middle, showing a cancellation in red), the
 [NM-TV cube](clients/nmtv/README.md) (top right — a repurposed ESP32 Bitcoin "lottery miner"
-desk gadget), the [Heltec Wireless Paper](clients/heltec/README.md) e-ink board (showing
+desk gadget), the [CYD Portrait](clients/cydportrait/README.md) (second row — another CYD, in
+[AmeliaCore](https://www.makeronline.com/en/user/personalInfo/f7f6f4a3-8894-4b3d-96ce-259832965d9a.html)'s
+3D-printed stand, [model on Anycubic Makeronline](https://www.makeronline.com/en/model/ESP32%20CYD%202.8%22%20Panel%20de%20control%20(Clima,%20Acciones%20y%20Luna)/278002.html),
+with northbound trains in the top half and southbound in the bottom), the
+[Heltec Wireless Paper](clients/heltec/README.md) e-ink board (showing
 a delayed service as `09:42 :45`), the [Luckyminer LV02](clients/lv02/README.md) (another
 lottery-miner gadget, a LilyGo T-Display-S3 clone, in landscape), and the
 [SteelSeries Apex Pro TKL](clients/apexpro/README.md) keyboard OLED (bottom — four departure
@@ -134,7 +142,8 @@ host-side client driving a keyboard OLED:
   colour dot-matrix look (amber/orange/red status colours), with view cycling by the BOOT button
   **or** a screen tap.
 - [CYD Portrait client](clients/cydportrait/README.md) — another CYD, mounted portrait in a
-  3D-printed stand with no openings for the buttons. One fixed 240×320 screen shows every
+  3D-printed stand ([model on Anycubic Makeronline](https://www.makeronline.com/en/model/ESP32%20CYD%202.8%22%20Panel%20de%20control%20(Clima,%20Acciones%20y%20Luna)/278002.html))
+  with no openings for the buttons. One fixed 240×320 screen shows every
   departure, **northbound in the top half and southbound in the bottom half**, from the server's
   `split` view; same colour dot-matrix look.
 - [NM-TV client](clients/nmtv/README.md) — a repurposed NMTech "SmallTV" desk gadget (ESP32 +
@@ -256,3 +265,8 @@ mode isn't needed once `PIXOO_HOST` is pinned, so the bridge reaches the Pixoo a
 - Divoom HTTP protocol reference: [SomethingWithComputers/pixoo](https://github.com/SomethingWithComputers/pixoo) /
   [4ch1m/pixoo-rest](https://github.com/4ch1m/pixoo-rest) (used as references for the
   command set; not runtime dependencies)
+- CYD Portrait stand: **ESP32 CYD 2.8" Panel de control (Clima, Acciones y Luna)** by
+  [AmeliaCore](https://www.makeronline.com/en/user/personalInfo/f7f6f4a3-8894-4b3d-96ce-259832965d9a.html)
+  (`@AmeliaCore_1078635`), published on
+  [Anycubic Makeronline](https://www.makeronline.com/en/model/ESP32%20CYD%202.8%22%20Panel%20de%20control%20(Clima,%20Acciones%20y%20Luna)/278002.html)
+  under Creative Commons Public Domain.

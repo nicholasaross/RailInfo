@@ -1,11 +1,13 @@
 # RailInfo CYD Portrait client
 
 A single-screen MicroPython client for a **CYD** (ESP32-2432S028) mounted **portrait** in a
-3D-printed stand — the Makeronline
+3D-printed stand — the
 ["ESP32 CYD 2.8" Panel de control"](https://www.makeronline.com/en/model/ESP32%20CYD%202.8%22%20Panel%20de%20control%20(Clima,%20Acciones%20y%20Luna)/278002.html)
-— with the USB/power end at the bottom. The stand has no openings for the buttons, so there are
-no views to cycle: one fixed screen shows **every departure, split by direction** — northbound in
-the top half, southbound in the bottom half.
+model by [AmeliaCore](https://www.makeronline.com/en/user/personalInfo/f7f6f4a3-8894-4b3d-96ce-259832965d9a.html)
+on Anycubic Makeronline (Creative Commons Public Domain) — with the USB/power end at the bottom. The stand has no openings
+for the buttons, so there are no views to cycle: one fixed screen shows **every departure, split
+by direction** — northbound in the top half, southbound in the bottom half. (Photo of it running:
+the gallery in the [main README](../../README.md).)
 
 It's the [CYD client](../cyd/README.md)'s renderer (colour dot-matrix, strip-blit, per-row status
 colours) on a 240×320 portrait layout, fed by the server's **`split`** view.
