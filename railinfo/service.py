@@ -12,7 +12,7 @@ import dataclasses
 
 from railinfo.config import Settings
 from railinfo.domain.mapper import from_ldbws, from_service_details
-from railinfo.domain.models import DepartureBoard, Service
+from railinfo.domain.models import DepartureBoard, Service, SplitBoard
 from railinfo.ldbws.client import LdbwsClient, LdbwsError
 
 # Sentinel for "caller didn't specify, fall back to the configured default". Distinct
@@ -52,6 +52,36 @@ class BoardService:
                 board, services=[self._with_calling_points(s) for s in board.services]
             )
         return board
+
+    def get_split_board(
+        self,
+        crs: str | None = None,
+        *,
+        filter_crs: str | None | object = _USE_SETTINGS,
+        filter_type: str | object = _USE_SETTINGS,
+    ) -> SplitBoard:
+        """Every departure split by direction: two _LDB calls, no Service Details.
+
+        Northbound = the services matching the direction filter; southbound = the same filter
+        CRS with the opposite ``filter_type`` (from Earlswood with RDH: "calls at Redhill next"
+        vs "came via Redhill", which between them cover every train that stops there). Both
+        halves are LDBWS's own filters, so a train can't land in the wrong half however the two
+        calls are timed, and each half gets its own row budget. With no direction filter there
+        is nothing to split on, so every service is northbound.
+        """
+        if filter_crs is _USE_SETTINGS:
+            filter_crs = self._settings.direction_filter_crs
+        if filter_type is _USE_SETTINGS:
+            filter_type = self._settings.direction_filter_type
+        north = self.get_departure_board(crs, filter_crs=filter_crs, filter_type=filter_type)
+        if not filter_crs:
+            return SplitBoard(board=north, northbound=list(north.services))
+        south = self.get_departure_board(
+            crs, filter_crs=filter_crs, filter_type="from" if filter_type == "to" else "to"
+        )
+        return SplitBoard(
+            board=north, northbound=list(north.services), southbound=list(south.services)
+        )
 
     def get_service_details(self, service_id: str) -> Service:
         """Full detail (incl. calling points) for one service (_SD)."""

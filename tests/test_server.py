@@ -9,9 +9,16 @@ import urllib.request
 
 from conftest import make_service
 
-from railinfo.domain.models import CallingPoint, DepartureBoard
+from railinfo.domain.models import CallingPoint, DepartureBoard, SplitBoard
 from railinfo.ldbws.client import LdbwsError
-from railinfo.server import BoardCache, _project, _stops_index, make_server, to_client_dict
+from railinfo.server import (
+    BoardCache,
+    _project,
+    _stops_index,
+    make_server,
+    to_client_dict,
+    to_split_dict,
+)
 
 
 def _ready(cache: BoardCache, view: str = "departures") -> DepartureBoard:
@@ -67,10 +74,22 @@ def _arr_board() -> DepartureBoard:
     )
 
 
+def _split_board() -> SplitBoard:
+    return SplitBoard(
+        board=_dep_board(),
+        northbound=[make_service(std="14:13", destination="Peterborough", platform="1")],
+        southbound=[
+            make_service(std="14:12", etd="14:17", destination="Horsham", platform="2"),
+            make_service(std="14:42", destination="Horsham", platform=None, is_cancelled=True),
+        ],
+    )
+
+
 class _FakeService:
     def __init__(self) -> None:
         self.dep_calls = 0
         self.arr_calls = 0
+        self.split_calls = 0
 
     def get_departure_board(self, crs=None, with_details=False, **kwargs) -> DepartureBoard:
         self.dep_calls += 1
@@ -79,6 +98,10 @@ class _FakeService:
     def get_arr_dep_board(self, crs=None) -> DepartureBoard:
         self.arr_calls += 1
         return _arr_board()
+
+    def get_split_board(self, crs=None, **kwargs) -> SplitBoard:
+        self.split_calls += 1
+        return _split_board()
 
 
 class _SlowService(_FakeService):
@@ -92,6 +115,9 @@ class _FailingService:
         raise LdbwsError("upstream down")
 
     def get_arr_dep_board(self, crs=None):
+        raise LdbwsError("upstream down")
+
+    def get_split_board(self, crs=None, **kwargs):
         raise LdbwsError("upstream down")
 
 
@@ -124,6 +150,23 @@ def test_to_client_dict_arrivals_uses_origin_and_arrival_time():
 def test_project_selects_view_shape():
     assert "calling_at" in json.loads(_project("departures", _dep_board()))  # landscape
     assert "calling_at" not in json.loads(_project("all", _dep_board()))     # portrait list
+    assert "northbound" in json.loads(_project("split", _split_board()))     # two halves
+
+
+def test_to_split_dict_projects_both_halves():
+    data = to_split_dict(_split_board())
+    assert data["status"] == "ready" and data["station"] == "Earlswood"
+    assert [s["destination"] for s in data["northbound"]] == ["Peterborough"]
+    delayed, cancelled = data["southbound"]
+    assert (delayed["time"], delayed["expected"], delayed["platform"]) == ("14:12", "14:17", "2")
+    assert cancelled["is_cancelled"] is True and cancelled["platform"] is None
+    assert "services" not in data and "calling_at" not in data  # halves only, no calling points
+
+
+def test_to_split_dict_limits_each_half():
+    many = [make_service(std=f"15:{i:02d}") for i in range(12)]
+    data = to_split_dict(SplitBoard(board=_dep_board(), northbound=many, southbound=many), limit=8)
+    assert len(data["northbound"]) == 8 and len(data["southbound"]) == 8
 
 
 def test_cache_starts_lazily_then_serves_board():
@@ -169,18 +212,31 @@ def test_cache_views_are_independent():
     assert data["services"][0]["destination"] == "London Bridge"  # origin shown as the label
 
 
+def test_cache_serves_split_view_lazily():
+    svc = _FakeService()
+    cache = BoardCache(svc, ttl=999)
+    assert cache.get_board("split") is None  # lazy: kicks off the fetch, no board yet
+    split = _ready(cache, "split")
+    assert isinstance(split, SplitBoard)
+    assert (svc.split_calls, svc.dep_calls) == (1, 0)  # its own fetch, nothing else touched
+    data = json.loads(_project("split", split, stale=cache.is_stale("split")))
+    assert data["northbound"][0]["destination"] == "Peterborough" and data["stale"] is False
+
+
 def test_cache_warms_all_views_on_wake():
     # After an idle gap the next request must warm ALL views (not just the requested one), so
     # cycling between screens right after a wake finds them fresh instead of each stale in turn.
     svc = _FakeService()
     cache = BoardCache(svc, ttl=999, wake_after=0.05)
     _ready(cache, "departures")  # first connect is NOT a wake: only departures fetched
-    assert (svc.dep_calls, svc.arr_calls) == (1, 0)
+    assert (svc.dep_calls, svc.arr_calls, svc.split_calls) == (1, 0, 0)
     time.sleep(0.06)  # idle past wake_after -> the next request is a "wake"
-    cache.get_board("departures")  # departures stays fresh (ttl 999); 'all' + 'arrivals' warm
+    cache.get_board("departures")  # departures stays fresh (ttl 999); the other views warm
     _ready(cache, "all")
     _ready(cache, "arrivals")
+    _ready(cache, "split")
     assert svc.dep_calls == 2 and svc.arr_calls == 1  # 'all' = a departure fetch; 'arrivals' too
+    assert svc.split_calls == 1
 
 
 def test_cache_does_not_warm_others_without_idle_gap():
@@ -193,6 +249,7 @@ def test_cache_does_not_warm_others_without_idle_gap():
         cache.get_board("departures")  # rapid polls, well within wake_after
     time.sleep(0.02)
     assert svc.dep_calls == 1 and svc.arr_calls == 0  # only departures ever fetched
+    assert svc.split_calls == 0
 
 
 def test_is_stale_and_projection_reflect_age():
@@ -227,6 +284,23 @@ def test_http_serves_views_and_health():
             assert json.loads(r.read())["services"][0]["time"] == "14:09"
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=5) as r:
             assert json.loads(r.read())["ok"] is True
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_http_serves_split_view():
+    cache = BoardCache(_FakeService(), ttl=999)
+    _ready(cache, "split")
+    httpd = _serve(cache)
+    port = httpd.server_address[1]
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/board?view=split", timeout=5) as r:
+            data = json.loads(r.read())
+        assert [s["destination"] for s in data["northbound"]] == ["Peterborough"]
+        assert [s["destination"] for s in data["southbound"]] == ["Horsham", "Horsham"]
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=5) as r:
+            assert "split" in json.loads(r.read())["views"]
     finally:
         httpd.shutdown()
         httpd.server_close()

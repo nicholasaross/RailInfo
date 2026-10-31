@@ -12,6 +12,7 @@ wheels/
 clients/heltec/config.py
 clients/cyd/config.py
 clients/nmtv/config.py
+clients/cydportrait/config.py
 
 # Virtual environments
 .venv

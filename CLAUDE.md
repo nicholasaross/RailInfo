@@ -27,7 +27,10 @@ Data acquisition is decoupled from presentation behind `railinfo/domain` + `rail
   is down.
 - `railinfo/server.py` — **Phase 4 JSON API** (stdlib `http.server`). `python main.py --serve`.
   Views via `?view=`: `departures` (default, northbound, with calling points),
-  `all` (every direction), `arrivals` (by origin). **`BoardCache`** holds the domain
+  `all` (every direction), `arrivals` (by origin), `split` (every departure as `northbound` /
+  `southbound` lists for the CYD Portrait's halves — `BoardService.get_split_board`: the direction
+  filter plus the same CRS with the opposite `filterType`, 2 LDBWS calls, cached as a domain
+  `SplitBoard`). **`BoardCache`** holds the domain
   `DepartureBoard` per view (not JSON): **lazy on connect** (first request → `{"status":
   "starting"}` + background fetch; later polls get `"status":"ready"`), then
   **stale-while-revalidate** with coalesced refresh (one fetch in flight per view). `_project`
@@ -37,7 +40,7 @@ Data acquisition is decoupled from presentation behind `railinfo/domain` + `rail
   `--stale-after`, default 90s — set > TTL so routine 30s revalidation doesn't trip it) so clients
   can show a "refreshing" indicator; and **warm-on-wake** — a request after an idle gap
   > `--wake-after` (default 45s) warms **all** views (not just the requested one), so cycling
-  screens right after a wake is fresh. Bounded to wake events (departures ≈7 API calls). See
+  screens right after a wake is fresh. Bounded to wake events (departures ≈7 API calls, split 2). See
   `is_stale`/`_ensure_refresh_locked` in `BoardCache`.
 - `clients/heltec/` — **Phase 4 MicroPython client** for the Heltec Wireless Paper V1.2.
 
@@ -99,6 +102,26 @@ mirrors `renderers/pixoo.py`). All three views are **landscape** (no portrait tr
   loop. **The touch IRQ line GPIO36 is unusable** (fires ~9 phantom IRQs/s; a real tap doesn't
   pull it low) — an IRQ design auto-cycled the view each poll and ate BOOT presses. Don't go back
   to IRQs on GPIO36.
+
+## CYD Portrait client (`clients/cydportrait/`)
+
+**Seventh client** (added 2026-10-31): a third CYD (ESP32-2432S028; ESP32-D0WD-V3, no PSRAM,
+CH340 on **COM7**, MAC `04:b2:47:9c:b8:04`, MicroPython **1.29.0**) in a 3D-printed **portrait**
+stand — USB/power at the bottom, **no openings for the buttons**, so no input and one screen. It
+shows every departure from **`?view=split`**: northbound in the top half, southbound in the bottom
+(two equal halves of 6 rows; LDBWS's 2-hour window gives ~4 per direction off-peak). Same
+strip-blit renderer, palette, header and stale hourglass as the CYD, but dotmatrix19 at 1× only
+(no ×2 rows, no footer). `_is_delayed` also counts a bare `"Delayed"` as orange (the Pixoo's rule).
+
+- **Panel = native landscape (ILI9342-type) → portrait MADCTL `0xE0` (MV|MX|MY)**, RGB, no
+  inversion. Found with **`_orient.py`** (cycles 8 numbered MADCTL test cards; card 8 was upright
+  with "USB end" by the connector). The ID registers were inconclusive (RDDID `10 81 b3`). With
+  true 240×320 windows MV is fine — the H685 "MV = half-width" note was about 320-wide windows.
+  **Rerun `_orient.py` for any new CYD** before trusting a rotation byte.
+- Driver = the CYD's `ili9341.py` copy + `ROTATION_PORTRAIT` + an optional `invert` (INVON, for
+  the ST7789 CYD variant). `boards.py` also holds GPIO16/17 high (rear RGB LED off).
+- `deploy.ps1 -Port COM7 [-Autostart]` (`-Port` mandatory). Device DHCP `192.168.1.249`. Against a
+  server without the split view it shows "Server needs the split view" rather than empty halves.
 
 ## NM-TV client (`clients/nmtv/`)
 
@@ -208,14 +231,17 @@ screen is a different device type and is not handled.
   (one attached at a time). Always `esptool flash-id` + eyeball which device is plugged in
   before flashing — the NM-TV and CYD flash the same way (ESP32_GENERIC @ `0x1000`) but run
   different clients.
+- **The CYD Portrait enumerated as COM7** (CH340, 2026-10-31) — the same number the LV02 has used,
+  so the same rule applies: `esptool flash-id` (MAC `04:b2:47:9c:b8:04`) before flashing anything.
 - `mpremote` installed via `uv tool install mpremote`; `esptool` lives in `D:\Projects\ESP\.venv`.
 - **Network ops need the sandbox disabled** (uv fetching freetype-py; the server's LDBWS calls).
   Serial (mpremote) and loopback curl do not.
 - MicroPython can't resolve hostnames → `clients/heltec/config.py` `SERVER_URL` must be an IP.
   `config.py` is gitignored (WiFi creds + server IP). **Live: the NAS `192.168.1.10:8088`**
-  (dev-box `192.168.1.116:8000` for local testing).
+  (dev box for local testing: `192.168.1.113:8000` as of 2026-10-31 — it's DHCP and was `.116`,
+  so check `Get-NetIPAddress` first).
 - Font regen needs freetype-py (cached in uv): `uv run --offline --with freetype-py ...`.
-- Run tests: `uv run --offline pytest` (48 tests incl. `tests/test_server.py`).
+- Run tests: `uv run --offline pytest` (60 tests incl. `tests/test_server.py`).
 
 ## NAS deployment (Phase 3)
 
@@ -246,10 +272,26 @@ writes a prebuilt-image compose + LF-normalised `.env` and runs compose up. Rede
 
 ---
 
-## RESUME HERE — 2026-09-28
+## RESUME HERE — 2026-10-31
 
 **All four phases done and live** (NAS container on `192.168.1.10:8088`; Heltec polls it).
-Six clients now, the newest being the host-side Apex Pro OLED one.
+Seven clients now, the newest being the **CYD Portrait** (single portrait screen, split by
+direction).
+
+### Done this session (2026-10-31) — CYD Portrait (7th client) + `split` server view
+- **New client `clients/cydportrait/`** for a third CYD in a 3D-printed portrait stand (no button
+  openings) — see "CYD Portrait client" above. Wiped the factory demo and flashed MicroPython
+  **1.29.0** (COM7), found the portrait MADCTL (`0xE0`) with the new `_orient.py` probe, ran the
+  smoketest, and **installed it as autostart**. Layout, colours and the stale hourglass were all
+  confirmed on the panel.
+- **Server: `?view=split`** — `SplitBoard` (`domain/models.py`), `BoardService.get_split_board`,
+  `to_split_dict` + `SPLIT_LIMIT = 8` (`server.py`). Northbound = the `DIRECTION_FILTER_CRS` "to"
+  board; southbound = the same CRS "from". Verified live that RDH to + from is exactly the whole
+  Earlswood board (4 + 4 = 8, no overlap). 7 new tests; suite **60 green**.
+- **NAS deploy pending** (needs the user's SSH/sudo). The CYD Portrait is already pointed at the
+  NAS (`config.py` → `192.168.1.10:8088`); until the new image is live it shows "Server needs the
+  split view", and it picks the board up on its own once the NAS serves `split`. See "Still
+  pending".
 
 ### Done this session (2026-09-28, later) — refreshing indicator + warm-on-wake
 - **Server:** `BoardCache` now warms **all** views on a wake (idle gap > `--wake-after`, default
@@ -456,13 +498,17 @@ polls it and the dev-box processes are retired. The 2026-06-23 UI sign-off still
 polls `192.168.1.10:8088`; device DHCP `192.168.1.139`.
 
 **Local testing on the dev box** (network → **disable sandbox**; point the Heltec's config.py
-back at `192.168.1.116:8000`, or just curl /board yourself):
+back at the dev box — `192.168.1.113:8000` as of 2026-10-31, DHCP — or just curl /board yourself):
 `uv run python -u main.py --serve --pixoo --loop --port 8000` — one process feeds both displays
 from a single LDBWS fetch. (Split mode `--serve` + `--pixoo --loop` still works but doubles the
 departures fetch; dev-box processes die when the box sleeps — the NAS doesn't.)
 
 ### Still pending
-- _(none — all caught up.)_
+- **Deploy the `split` server to the NAS** (Docker Desktop on, then
+  `pwsh scripts/deploy-to-nas.ps1 -NasHost 192.168.1.10 -NasUser <admin> -Start -HostPort 8088`;
+  it rebuilds the image). The CYD Portrait is already configured for the NAS, so then just check
+  `curl http://192.168.1.10:8088/healthz` lists `split` and the panel shows the board.
+- Optional: a photo of the CYD Portrait in its stand for the README gallery.
 
 ### Decisions locked
 - Proportional fonts (NOT monospaced); 9 + 19 only; tabular/centred digits.
@@ -493,3 +539,9 @@ departures fetch; dev-box processes die when the box sleeps — the NAS doesn't.
   Pixoo run loop connects lazily and retries forever via a `connect` factory, never raising out
   of `runner.run`. (Likewise the server is lazy on connect, so the Heltec doesn't depend on the
   Pixoo for the first fetch.) Don't reintroduce eager Pixoo construction on the main thread.
+- **The `split` view uses mirror filters**: northbound = `DIRECTION_FILTER_CRS` with its
+  `filterType`, southbound = the same CRS with the opposite type — NOT "all minus northbound".
+  Each half is LDBWS's own filter, so a train can't be misfiled when the two calls see slightly
+  different boards (a departure, or a train entering the 2-hour window), and each half gets its
+  own row budget. Valid because Redhill is next on the only line through Earlswood (verified
+  live: to + from = all).

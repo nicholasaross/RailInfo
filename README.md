@@ -5,7 +5,8 @@ A software-only live National Rail departure board, inspired by
 but with no Raspberry Pi hardware. It reads real-time data from the National Rail
 **LDBWS** REST API (via the Rail Data Marketplace) and renders it to the terminal, a
 [Divoom Pixoo 64](https://divoom.com/products/pixoo-64), a battery e-ink board (a
-Heltec Wireless Paper), a colour TFT (the CYD / ESP32-2432S028), a repurposed
+Heltec Wireless Paper), a colour TFT (the CYD / ESP32-2432S028, in landscape or as a
+portrait desk stand), a repurposed
 "SmallTV" desk cube (the NMTech NM-TV), a Bitcoin "lottery-miner" gadget (the
 Luckyminer LV02), or the OLED screen on a SteelSeries Apex Pro TKL keyboard — the
 last five fed by a small JSON server.
@@ -124,7 +125,7 @@ scroll is deliberately paced. `--loop` re-fetches data every `--interval` second
 ## Phase 4 — JSON server + pull clients (done)
 
 A small stdlib HTTP server (`--serve`) exposes the board as JSON at `/board`, and one or more
-display clients poll it and render a live board — four on-device ESP32 displays, plus one
+display clients poll it and render a live board — five on-device ESP32 displays, plus one
 host-side client driving a keyboard OLED:
 
 - [Heltec Wireless Paper](clients/heltec/README.md) — ESP32-S3 + 2.13" monochrome e-ink (MicroPython).
@@ -132,6 +133,10 @@ host-side client driving a keyboard OLED:
   (MicroPython). A **hybrid**: the Heltec's pull/multi-view behaviour rendered in the Pixoo's
   colour dot-matrix look (amber/orange/red status colours), with view cycling by the BOOT button
   **or** a screen tap.
+- [CYD Portrait client](clients/cydportrait/README.md) — another CYD, mounted portrait in a
+  3D-printed stand with no openings for the buttons. One fixed 240×320 screen shows every
+  departure, **northbound in the top half and southbound in the bottom half**, from the server's
+  `split` view; same colour dot-matrix look.
 - [NM-TV client](clients/nmtv/README.md) — a repurposed NMTech "SmallTV" desk gadget (ESP32 +
   1.54" 240×240 ST7789 IPS; sold as a Bitcoin lottery miner). A port of the CYD client; view
   cycling by the capacitive touch pad on the case top.
@@ -144,11 +149,14 @@ host-side client driving a keyboard OLED:
   own 1-bit bitmap in the shared Dot Matrix font — four departure rows (destination left,
   platform+time right) — and pushes it to the keyboard screen. Needs SteelSeries GG running.
 
-Three views, chosen with `?view=`:
+Four views, chosen with `?view=`:
 
 - `departures` (default) — northbound board with the "calling at…" line (landscape).
 - `all` — every departure, no direction filter (portrait).
 - `arrivals` — arriving services, labelled by origin (portrait).
+- `split` — every departure split by direction into `northbound` / `southbound` lists (the CYD
+  Portrait's two halves). Northbound is the `DIRECTION_FILTER_CRS` filter ("calls at Redhill
+  next"); southbound is the same station with the opposite filter type ("came via Redhill").
 
 The server **holds no state until a client connects** — it never calls LDBWS at startup.
 The first request for a view returns `{"status": "starting", …}` immediately and fetches
@@ -160,7 +168,7 @@ makes no API calls — whenever nothing is displaying it.
 Two conveniences smooth the "just woke it up" experience. The board carries a **`stale`** flag
 (older than `--stale-after`, default 90s) so clients can show a small **"refreshing" indicator**
 while a fresh lookup runs, instead of passing stale data off as live. And a request arriving
-after an idle gap (> `--wake-after`, default 45s) **warms all three views at once**, so cycling
+after an idle gap (> `--wake-after`, default 45s) **warms every view at once**, so cycling
 between screens right after a wake is fresh rather than each view refreshing in turn. The
 clients that scroll a calling-at footer also **hold it static until the data is live**.
 
@@ -184,8 +192,8 @@ the pull clients keep working on their own.
 
 The clients can't resolve hostnames, so set the server's LAN IP (not a name) in each client's
 `config.py`. See the [Heltec](clients/heltec/README.md), [CYD](clients/cyd/README.md),
-[NM-TV](clients/nmtv/README.md), and [LV02](clients/lv02/README.md) READMEs for flashing, fonts,
-view cycling, and configuration.
+[CYD Portrait](clients/cydportrait/README.md), [NM-TV](clients/nmtv/README.md), and
+[LV02](clients/lv02/README.md) READMEs for flashing, fonts, view cycling, and configuration.
 
 ## Development
 
@@ -214,6 +222,8 @@ renderer — terminal, Pixoo, and the e-ink client's JSON server — shares one 
 - `railinfo/server.py` — Phase 4 JSON API (`--serve`); projects the domain model to `/board`.
 - `clients/heltec/` — MicroPython e-ink client (polls the server; see its own README).
 - `clients/cyd/` — MicroPython colour-TFT client (ESP32-2432S028; strip-blit dot-matrix renderer).
+- `clients/cydportrait/` — the CYD client's renderer as a single portrait screen (northbound /
+  southbound halves from `?view=split`); `_orient.py` finds a new CYD's panel rotation.
 - `clients/nmtv/` — MicroPython client for the NMTech NM-TV cube (ESP32 + SPI ST7789).
 - `clients/lv02/` — MicroPython client for the Luckyminer LV02 (ESP32-S3 + **parallel** ST7789;
   its `lib/st7789.py` is a purpose-built i8080 driver that transposes 90° for landscape).

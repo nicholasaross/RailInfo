@@ -57,3 +57,18 @@ class DepartureBoard:
     generated_at: str | None
     nrcc_messages: list[str] = field(default_factory=list)
     services: list[Service] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class SplitBoard:
+    """One station's departures split by direction, for a two-half display (the CYD Portrait).
+
+    ``northbound`` holds the services matching the direction filter (``DIRECTION_FILTER_CRS``;
+    from Earlswood, RDH = "calls at Redhill next") and ``southbound`` those matching the same CRS
+    with the opposite filter type ("came via Redhill"). ``board`` supplies the header fields
+    (station name, CRS, generated time, messages).
+    """
+
+    board: DepartureBoard
+    northbound: list[Service] = field(default_factory=list)
+    southbound: list[Service] = field(default_factory=list)

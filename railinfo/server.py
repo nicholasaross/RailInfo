@@ -1,11 +1,13 @@
 """HTTP server exposing the departure board(s) as JSON for LAN display clients.
 
-Three views, selected with ``?view=``:
+Four views, selected with ``?view=``:
 
 * ``departures`` (default) — the northbound board with calling points (the Heltec's
   landscape view, and what the Pixoo shows).
 * ``all`` — every departure, no direction filter (the Heltec's portrait view).
 * ``arrivals`` — arriving services, labelled by origin (portrait view).
+* ``split`` — every departure split by direction into ``northbound`` / ``southbound`` lists
+  (the CYD Portrait's two halves; see :meth:`BoardService.get_split_board`).
 
 The server holds **no state until a client connects** — it never queries LDBWS eagerly at
 startup. The first request for a view returns ``{"status": "starting", ...}`` immediately and
@@ -31,15 +33,16 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from railinfo.domain.models import DepartureBoard, Service
+from railinfo.domain.models import DepartureBoard, Service, SplitBoard
 from railinfo.ldbws.client import LdbwsError
 from railinfo.service import BoardService
 
 log = logging.getLogger(__name__)
 
-VIEWS = ("departures", "all", "arrivals")
+VIEWS = ("departures", "all", "arrivals", "split")
 LANDSCAPE_LIMIT = 6   # landscape board shows ~5
 PORTRAIT_LIMIT = 25   # portrait list shows ~25
+SPLIT_LIMIT = 8       # per direction; the CYD Portrait shows up to 6 in each half
 
 
 def _stops_index(services: list[Service]) -> int | None:
@@ -105,9 +108,27 @@ def to_client_dict(
     return out
 
 
-def _project(view: str, board: DepartureBoard, *, stale: bool = False) -> bytes:
+def to_split_dict(split: SplitBoard, limit: int = SPLIT_LIMIT, *, stale: bool = False) -> dict:
+    """Project a :class:`SplitBoard` for a two-half display: the usual header keys plus the
+    ``northbound`` / ``southbound`` service lists (no calling points)."""
+    board = split.board
+    return {
+        "status": "ready",
+        "stale": stale,
+        "station": board.location_name,
+        "crs": board.crs,
+        "generated_at": board.generated_at,
+        "messages": list(board.nrcc_messages),
+        "northbound": [_svc_dict(s, False) for s in split.northbound[:limit]],
+        "southbound": [_svc_dict(s, False) for s in split.southbound[:limit]],
+    }
+
+
+def _project(view: str, board: DepartureBoard | SplitBoard, *, stale: bool = False) -> bytes:
     """Render the JSON body for ``view`` from a cached domain board."""
-    if view == "arrivals":
+    if view == "split":
+        payload = to_split_dict(board, stale=stale)
+    elif view == "arrivals":
         payload = to_client_dict(board, PORTRAIT_LIMIT, arrivals=True, stale=stale)
     elif view == "all":
         payload = to_client_dict(board, PORTRAIT_LIMIT, stale=stale)
@@ -117,7 +138,8 @@ def _project(view: str, board: DepartureBoard, *, stale: bool = False) -> bytes:
 
 
 class BoardCache:
-    """Caches the domain :class:`DepartureBoard` per view; one LDBWS fetch feeds all consumers.
+    """Caches the domain :class:`DepartureBoard` per view (a :class:`SplitBoard` for ``split``);
+    one LDBWS fetch feeds all consumers.
 
     Lazy on connect: a view isn't fetched until first requested, and :meth:`get_board` returns
     ``None`` until that first fetch lands (the HTTP layer renders this as ``status:"starting"``).
@@ -150,7 +172,7 @@ class BoardCache:
         self._wake_after = wake_after
         self._last_seen = 0.0  # monotonic time of the last request (for wake detection)
         self._lock = threading.Lock()
-        self._cache: dict[str, tuple[DepartureBoard, float]] = {}
+        self._cache: dict[str, tuple[DepartureBoard | SplitBoard, float]] = {}
         self._inflight: set[str] = set()  # views with a fetch running (refresh coalescing)
         self._started = False  # has any client connected yet?
         self.starting = json.dumps(
@@ -166,7 +188,9 @@ class BoardCache:
             ensure_ascii=False,
         ).encode("utf-8")
 
-    def _fetch_board(self, view: str) -> DepartureBoard:
+    def _fetch_board(self, view: str) -> DepartureBoard | SplitBoard:
+        if view == "split":
+            return self._service.get_split_board(self._crs, **self._bk)
         if view == "arrivals":
             return self._service.get_arr_dep_board(self._crs)
         if view == "all":
@@ -175,7 +199,7 @@ class BoardCache:
             )
         return self._service.get_departure_board(self._crs, with_details=True, **self._bk)
 
-    def get_board(self, view: str) -> DepartureBoard | None:
+    def get_board(self, view: str) -> DepartureBoard | SplitBoard | None:
         """Current board for ``view`` (possibly slightly stale), or None if none fetched yet.
 
         Never blocks: when the entry is missing or past its TTL, a single background refresh is

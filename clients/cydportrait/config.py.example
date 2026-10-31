@@ -1,0 +1,14 @@
+# Copy to config.py (which is gitignored) and fill in your values.
+#
+# NOTE: MicroPython cannot resolve local hostnames, so SERVER_URL must use an IP address
+# (the NAS container running RailInfo, or your dev box while testing). The client appends
+# ?view=split itself, so the server must be a RailInfo build that has the `split` view.
+
+WIFI_SSID = "your-ssid"
+WIFI_PASSWORD = "your-password"
+
+SERVER_URL = "http://192.168.1.10:8088/board"
+
+# How often to poll the server. The TFT only re-blits rows whose pixels actually change, so a
+# short poll stays fresh without flicker.
+POLL_INTERVAL_S = 5
